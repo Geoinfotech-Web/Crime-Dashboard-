@@ -1,0 +1,1645 @@
+﻿const DATA_URL = 'dashboard_data.json';
+const NEWS_CONFIG_URL = 'news_config.json';
+
+let stateData = [];
+let awsdData = [];
+let chartData = {};
+let newsRefreshTimer = null;
+let liveArticles = [];
+let mapInstance = null;
+let liveReportLayer = null;
+let trendChart = null;
+let attackDonutChart = null;
+let monthBarChart = null;
+let locationAliasMap = new Map();
+let locationAliasKeys = [];
+let newsUpdateInFlight = false;
+let liveFeedHeartbeatTimer = null;
+let liveFeedLastUpdatedAt = null;
+let liveFeedNextRefreshAt = null;
+let liveFeedMode = 'connecting';
+let lastHighlightedLiveArticleUrl = null;
+const LIVE_REFRESH_MS = 30000;
+const LIVE_RETRY_MS = 10000;
+
+async function loadDashboardData() {
+  const response = await fetch(DATA_URL);
+  if (!response.ok) {
+    throw new Error(`Unable to load ${DATA_URL}: ${response.status}`);
+  }
+  return response.json();
+}
+
+async function loadNewsConfig() {
+  const response = await fetch(NEWS_CONFIG_URL);
+  if (!response.ok) {
+    throw new Error(`Unable to load ${NEWS_CONFIG_URL}: ${response.status}`);
+  }
+  return response.json();
+}
+
+function formatCompact(value) {
+  return value >= 1000 ? `${(value / 1000).toFixed(1)}K` : value.toLocaleString();
+}
+
+function updateSummary(meta) {
+  const totalDeaths = stateData.reduce((sum, item) => sum + item.deaths, 0);
+  const totalIncidents = stateData.reduce((sum, item) => sum + item.incidents, 0);
+  const totalAffected = awsdData.reduce((sum, item) => sum + item.affected, 0);
+
+  document.getElementById('dashboardTitle').textContent = meta.title;
+  document.getElementById('dashboardSubtitle').textContent = meta.subtitle;
+  document.getElementById('deathBadge').textContent = `${totalDeaths.toLocaleString()} deaths`;
+  document.getElementById('incidentBadge').textContent = `${totalIncidents.toLocaleString()} incidents`;
+  document.getElementById('awsdBadge').textContent = `${awsdData.length} AWSD records, GPS-mapped`;
+  document.getElementById('totalDeathsKpi').textContent = formatCompact(totalDeaths);
+  document.getElementById('totalIncidentsKpi').textContent = totalIncidents.toLocaleString();
+  document.getElementById('aidWorkersKpi').textContent = totalAffected.toLocaleString();
+  document.getElementById('statesKpi').textContent = stateData.length.toLocaleString();
+}
+
+function showLoadError(error) {
+  const pill = document.getElementById('infoPill');
+  pill.textContent = 'Could not load dashboard_data.json';
+  console.error(error);
+}
+
+
+function buildGdeltQuery(config) {
+  const keywordQuery = `(${config.keywords.map(term=>`"${term}"`).join(' OR ')})`;
+  const sourceCountry = config.sourceCountry ? ` sourcecountry:${config.sourceCountry}` : '';
+  const domainQuery = config.restrictToDomains && config.domains?.length
+    ? ` (${config.domains.map(domain=>`domainis:${domain}`).join(' OR ')})`
+    : '';
+
+  return `${keywordQuery}${sourceCountry}${domainQuery}`;
+}
+
+function buildGdeltUrl(config) {
+  const params = new URLSearchParams({
+    query: buildGdeltQuery(config),
+    mode: 'artlist',
+    format: 'json',
+    sort: config.sort || 'datedesc',
+    timespan: config.timespan || '24h',
+    maxrecords: String(config.maxRecords || 20)
+  });
+
+  return `${config.endpoint}?${params.toString()}`;
+}
+
+function formatNewsDate(value) {
+  if (!value) return 'recent';
+  const normalized = value.includes('T') ? value : value.replace(
+    /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/,
+    '$1-$2-$3T$4:$5:$6Z'
+  );
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+}
+
+function formatRelativeSeconds(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
+}
+
+function renderLiveFeedIndicator() {
+  const indicator = document.getElementById('liveNewsIndicatorText');
+  if (!indicator) return;
+
+  const now = Date.now();
+  const lastUpdatedText = liveFeedLastUpdatedAt
+    ? formatRelativeSeconds(Math.max(0, Math.floor((now - liveFeedLastUpdatedAt) / 1000)))
+    : 'never';
+  const nextRefreshText = liveFeedNextRefreshAt
+    ? formatRelativeSeconds(Math.max(0, Math.ceil((liveFeedNextRefreshAt - now) / 1000)))
+    : '--';
+
+  if (liveFeedMode === 'cached') {
+    indicator.textContent = `Cached snapshot active. Last live attempt ${lastUpdatedText} ago. Retrying in ${nextRefreshText}.`;
+    return;
+  }
+  if (liveFeedMode === 'retrying') {
+    indicator.textContent = `Reconnecting to live feeds. Last successful update ${lastUpdatedText} ago. Retrying in ${nextRefreshText}.`;
+    return;
+  }
+  if (liveFeedMode === 'connecting') {
+    indicator.textContent = 'Connecting to live feeds...';
+    return;
+  }
+
+  indicator.textContent = `Live now. Last updated ${lastUpdatedText} ago. Next refresh in ${nextRefreshText}.`;
+}
+
+function startLiveFeedHeartbeat() {
+  if (liveFeedHeartbeatTimer) return;
+  renderLiveFeedIndicator();
+  liveFeedHeartbeatTimer = setInterval(renderLiveFeedIndicator, 1000);
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, char=>({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[char]);
+}
+
+function normalizeNewsArticles(data) {
+  const articles = data.articles || data.items || [];
+  const seen = new Set();
+
+  return articles
+    .map(article=>{
+      const url = article.url || article.link || '';
+      let domain = article.domain || article.source?.name || '';
+      if (!domain && url) {
+        try { domain = new URL(url).hostname; } catch (error) { domain = 'unknown source'; }
+      }
+      return {
+        title: article.title,
+        url,
+        domain,
+        seenDate: article.seenDate || article.seendate || article.date_published || article.pubDate,
+        provider: article.provider || data.provider || 'news',
+        matchedKeywords: article.matchedKeywords || [],
+        matchedLocations: article.matchedLocations || []
+      };
+    })
+    .filter(article=>{
+      if (!article.title || !article.url || !article.url.startsWith('http') || seen.has(article.url)) return false;
+      seen.add(article.url);
+      return true;
+    });
+}
+
+function renderLiveNews(articles, refreshedAt, refreshMinutes, lookbackHours = 24, sourceMode = 'rss') {
+  liveArticles = articles;
+  const feed = document.getElementById('liveNewsFeed');
+  const status = document.getElementById('liveNewsStatus');
+  const badge = document.getElementById('liveNewsBadge');
+  const newestArticleUrl = articles[0]?.url || null;
+  const shouldHighlightNewest = Boolean(
+    newestArticleUrl &&
+    lastHighlightedLiveArticleUrl &&
+    newestArticleUrl !== lastHighlightedLiveArticleUrl
+  );
+  const checkedDate = refreshedAt ? new Date(refreshedAt) : new Date();
+  const now = Number.isNaN(checkedDate.getTime())
+    ? new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
+    : checkedDate.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  const refreshText = ' Auto-refresh is on.';
+  const windowText = ` Showing last ${lookbackHours}h.`;
+  const providerLabel = sourceMode === 'gdelt'
+    ? 'GDELT reports'
+    : sourceMode === 'cached'
+      ? 'cached reports'
+      : 'RSS reports';
+
+  feed.innerHTML = '';
+  status.textContent = articles.length
+    ? `${articles.length} ${providerLabel} found. Last checked ${now}.${windowText}${refreshText}`
+    : `No matching live reports found in the last ${lookbackHours}h. Last checked ${now}.${refreshText}`;
+  badge.textContent = articles.length
+    ? `${sourceMode === 'cached' ? 'RSS: cached' : 'RSS: live'} ${articles.length}`
+    : 'RSS: none';
+  renderLiveAnalysis(articles, now);
+
+  articles.slice(0, 20).forEach((article,index)=>{
+    const highlightClass = shouldHighlightNewest && index === 0 ? ' news-item-fresh' : '';
+    feed.innerHTML += `<a class="inc-item news-item${highlightClass}" href="${escapeHtml(article.url)}" target="_blank" rel="noopener noreferrer" data-report-index="${index}">
+      <div class="news-title">${escapeHtml(article.title)}</div>
+      <div class="news-meta"><span class="news-source">${escapeHtml(article.domain)}</span><span class="news-time">${escapeHtml(formatNewsDate(article.seenDate))}</span></div>
+      <div class="inc-tags">
+        <span class="inc-tag tag-live">Live report</span>
+        <span class="inc-tag tag-report">Media source</span>
+      </div>
+    </a>`;
+  });
+
+  feed.querySelectorAll('.news-item').forEach(item=>{
+    item.addEventListener('click',event=>{
+      event.preventDefault();
+      feed.querySelectorAll('.news-item').forEach(node=>node.classList.remove('active'));
+      item.classList.add('active');
+      const article = liveArticles[Number(item.dataset.reportIndex)];
+      showLiveReportOnMap(article);
+    });
+  });
+
+  if (newestArticleUrl) {
+    lastHighlightedLiveArticleUrl = newestArticleUrl;
+  }
+
+  updateChartsWithLiveReports(articles);
+}
+
+function clearNewsTimers() {
+  if (newsRefreshTimer) {
+    clearTimeout(newsRefreshTimer);
+    newsRefreshTimer = null;
+  }
+}
+
+function scheduleNewsRefresh(delayMs = LIVE_REFRESH_MS) {
+  clearNewsTimers();
+  liveFeedNextRefreshAt = Date.now() + delayMs;
+  renderLiveFeedIndicator();
+  newsRefreshTimer = setTimeout(()=>{
+    loadLiveNews().catch(showNewsError);
+  }, delayMs);
+}
+
+function mostFrequent(values) {
+  const counts = values.reduce((map, value)=>{
+    if (!value) return map;
+    map.set(value, (map.get(value) || 0) + 1);
+    return map;
+  }, new Map());
+  return [...counts.entries()].sort((a,b)=>b[1]-a[1])[0] || ['--', 0];
+}
+
+function renderLiveAnalysis(articles, checkedAt) {
+  const sourceNames = articles.map(article=>article.domain);
+  const keywords = articles.flatMap(article=>article.matchedKeywords || []);
+  const [topSource] = mostFrequent(sourceNames);
+  const [topKeyword] = mostFrequent(keywords);
+
+  document.getElementById('liveReportKpi').textContent = articles.length.toLocaleString();
+  document.getElementById('liveSourceKpi').textContent = new Set(sourceNames.filter(Boolean)).size.toLocaleString();
+  document.getElementById('topSourceKpi').textContent = topSource;
+  document.getElementById('topKeywordKpi').textContent = topKeyword;
+  document.getElementById('liveAnalysisNote').textContent = `RSS analysis refreshed at ${checkedAt}. These reports are media leads, not verified incident totals.`;
+}
+
+function normalizeLocationName(value) {
+  return String(value || '').toLowerCase().replace(/\s+state\b/g, '').replace(/[^a-z\s]/g, '').trim();
+}
+
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function addLocationAlias(alias, stateName, label) {
+  const normalizedAlias = normalizeLocationName(alias);
+  if (!normalizedAlias) return;
+  locationAliasMap.set(normalizedAlias, {
+    alias: normalizedAlias,
+    stateName,
+    label
+  });
+}
+
+function initializeLocationAliasMap() {
+  locationAliasMap = new Map();
+
+  stateData.forEach(state=>{
+    const shortName = state.state === 'FCT (Abuja)' ? 'Abuja' : state.state;
+    const stateLabel = state.state === 'FCT (Abuja)' ? 'Abuja, FCT' : `${shortName}, ${state.state}`;
+    addLocationAlias(shortName, state.state, stateLabel);
+    addLocationAlias(state.state, state.state, stateLabel);
+  });
+
+  [
+    ['fct', 'FCT (Abuja)', 'Abuja, FCT'],
+    ['federal capital territory', 'FCT (Abuja)', 'Abuja, FCT'],
+    ['abuja', 'FCT (Abuja)', 'Abuja, FCT'],
+    ['oriire', 'Oyo', 'Oriire, Oyo State'],
+    ['ogbomoso', 'Oyo', 'Ogbomoso, Oyo State'],
+    ['ogbomoso north', 'Oyo', 'Ogbomoso North, Oyo State'],
+    ['ogbomoso south', 'Oyo', 'Ogbomoso South, Oyo State'],
+    ['ibadan', 'Oyo', 'Ibadan, Oyo State'],
+    ['damaturu', 'Yobe', 'Damaturu, Yobe State'],
+    ['potiskum', 'Yobe', 'Potiskum, Yobe State'],
+    ['geidam', 'Yobe', 'Geidam, Yobe State'],
+    ['buni yadi', 'Yobe', 'Buni Yadi, Yobe State'],
+    ['gashua', 'Yobe', 'Gashua, Yobe State'],
+    ['maiduguri', 'Borno', 'Maiduguri, Borno State'],
+    ['monguno', 'Borno', 'Monguno, Borno State'],
+    ['gwoza', 'Borno', 'Gwoza, Borno State'],
+    ['damboa', 'Borno', 'Damboa, Borno State'],
+    ['ngala', 'Borno', 'Ngala, Borno State'],
+    ['rann', 'Borno', 'Rann, Borno State'],
+    ['damasak', 'Borno', 'Damasak, Borno State'],
+    ['jos', 'Plateau', 'Jos, Plateau State'],
+    ['makurdi', 'Benue', 'Makurdi, Benue State'],
+    ['anka', 'Zamfara', 'Anka, Zamfara State'],
+    ['gwadabawa', 'Sokoto', 'Gwadabawa, Sokoto State'],
+    ['batagarawa', 'Katsina', 'Batagarawa, Katsina State'],
+    ['akure', 'Ondo', 'Akure, Ondo State'],
+    ['abakpa nike', 'Enugu', 'Abakpa Nike, Enugu State'],
+    ['mbiakong', 'Akwa Ibom', 'Mbiakong, Akwa Ibom State'],
+    ['tomanyi', 'Benue', 'Tomanyi, Benue State'],
+    ['kajuru', 'Kaduna', 'Kajuru, Kaduna State'],
+    ['keffi', 'Nasarawa', 'Keffi, Nasarawa State']
+  ].forEach(([alias, stateName, label])=>addLocationAlias(alias, stateName, label));
+
+  locationAliasKeys = [...locationAliasMap.keys()].sort((a,b)=>b.length-a.length);
+}
+
+function locationMatchesText(alias, text) {
+  return new RegExp(`\\b${escapeRegex(alias).replace(/\s+/g, '\\s+')}\\b`, 'i').test(text);
+}
+
+function resolveArticleLocations(article) {
+  const title = normalizeLocationName(article.title);
+  const matchedLocations = (article.matchedLocations || []).map(normalizeLocationName);
+  const resolved = [];
+  const seenStates = new Set();
+
+  const pushLocation = entry => {
+    if (!entry || seenStates.has(entry.stateName)) return;
+    resolved.push(entry);
+    seenStates.add(entry.stateName);
+  };
+
+  locationAliasKeys.forEach(alias=>{
+    if (locationMatchesText(alias, title)) {
+      pushLocation(locationAliasMap.get(alias));
+    }
+  });
+
+  matchedLocations.forEach(location=>{
+    if (location === 'nigeria' || location === 'nigerian') return;
+    pushLocation(locationAliasMap.get(location));
+  });
+
+  return resolved;
+}
+
+function stateObjectByName(stateName) {
+  return stateData.find(state=>state.state === stateName) || null;
+}
+
+function statesForArticle(article) {
+  return resolveArticleLocations(article)
+    .map(location=>stateObjectByName(location.stateName))
+    .filter(Boolean);
+}
+
+function primaryLocationForArticle(article) {
+  return resolveArticleLocations(article)[0] || null;
+}
+
+function primaryStateForArticle(article) {
+  const location = primaryLocationForArticle(article);
+  return location ? stateObjectByName(location.stateName) : null;
+}
+
+function focusStateOnMap(state, popupTitle, popupBody) {
+  if (!state || !mapInstance || !liveReportLayer) return;
+
+  liveReportLayer.clearLayers();
+  const marker = L.circleMarker([state.lat, state.lng], {
+    radius:20,
+    fillColor:'#3fb950',
+    fillOpacity:0.34,
+    color:'#9ff5b4',
+    weight:3,
+    opacity:1
+  }).bindPopup(`
+    <div class="popup-title">${escapeHtml(popupTitle)}</div>
+    ${popupBody}
+  `).addTo(liveReportLayer);
+
+  mapInstance.flyTo([state.lat, state.lng], 8, {duration:1.25});
+  setTimeout(()=>marker.openPopup(), 350);
+}
+
+function showLiveReportOnMap(article) {
+  if (!article || !mapInstance || !liveReportLayer) return;
+
+  const matchedLocation = primaryLocationForArticle(article);
+  const matchedState = primaryStateForArticle(article);
+  const pill = document.getElementById('infoPill');
+  const mapPanel = document.querySelector('.map-center');
+
+  if (!matchedState || !matchedLocation) {
+    pill.textContent = 'No Nigerian state could be matched reliably to this report.';
+    setTimeout(()=>{pill.textContent='Click any marker for incident details. Scroll to zoom.';},4000);
+    return;
+  }
+
+  mapPanel?.scrollIntoView({behavior:'smooth', block:'center'});
+  focusStateOnMap(
+    matchedState,
+    `Live RSS Report - ${matchedLocation.label}`,
+    `
+      <div class="popup-row"><span>State</span><span>${escapeHtml(matchedState.state)}</span></div>
+      <div class="popup-row"><span>Source</span><span>${escapeHtml(article.domain)}</span></div>
+      <div class="popup-row"><span>Published</span><span>${escapeHtml(formatNewsDate(article.seenDate))}</span></div>
+      <div class="popup-detail">${escapeHtml(article.title)}</div>
+      <div class="popup-detail"><a href="${escapeHtml(article.url)}" target="_blank" rel="noopener noreferrer">Open source report</a></div>
+    `
+  );
+  pill.textContent = `Live report mapped to ${matchedLocation.label}.`;
+  setTimeout(()=>{pill.textContent='Click any marker for incident details. Scroll to zoom.';},5000);
+}
+
+function classifyLiveAttack(article) {
+  const text = normalizeLocationName(`${article.title} ${(article.matchedKeywords || []).join(' ')}`);
+  if (text.includes('kidnap') || text.includes('abduct')) return 'Kidnapping';
+  if (text.includes('kill') || text.includes('shoot') || text.includes('behead')) return 'Shooting/Killing';
+  if (text.includes('iswap') || text.includes('boko haram') || text.includes('bandit') || text.includes('attack')) return 'Armed attack';
+  if (text.includes('security') || text.includes('police') || text.includes('forces')) return 'Security operations';
+  return 'Other';
+}
+
+function classifyHistoricalAttack(record) {
+  const text = normalizeLocationName(record.attack || '');
+  if (text.includes('kidnap')) return 'Kidnapping';
+  if (text.includes('shoot') || text.includes('kill') || text.includes('ied') || text.includes('aerial')) return 'Shooting/Killing';
+  if (text.includes('complex') || text.includes('raid') || text.includes('ambush')) return 'Armed attack';
+  if (text.includes('assault')) return 'Assault';
+  return 'Other';
+}
+
+function countBy(items, getKey) {
+  const counts = new Map();
+  items.forEach(item=>{
+    const key = getKey(item);
+    if (!key) return;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  return counts;
+}
+
+function topKeysFromCounts(countMaps, limit = 6) {
+  const merged = new Map();
+  countMaps.forEach(map=>{
+    map.forEach((value, key)=>{
+      merged.set(key, (merged.get(key) || 0) + value);
+    });
+  });
+  return [...merged.entries()]
+    .sort((a,b)=>b[1]-a[1])
+    .slice(0, limit)
+    .map(([key])=>key);
+}
+
+function updateChartsWithLiveReports(articles) {
+  if (!trendChart || !attackDonutChart || !monthBarChart) return;
+
+  const historicalYearCounts = countBy(awsdData, item=>String(item.year));
+  const currentYearCounts = countBy(
+    articles.filter(article=>!Number.isNaN(new Date(article.seenDate).getTime())),
+    article=>String(new Date(article.seenDate).getFullYear())
+  );
+  const yearLabels = [...new Set([
+    ...[...historicalYearCounts.keys()].sort(),
+    ...[...currentYearCounts.keys()].sort()
+  ])];
+
+  trendChart.data.labels = yearLabels;
+  trendChart.data.datasets = [
+    {
+      type:'bar',
+      label:'Historical aid worker incidents',
+      data:yearLabels.map(label=>historicalYearCounts.get(label) || 0),
+      backgroundColor:'rgba(88,166,255,0.65)',
+      borderRadius:4,
+      order:2
+    },
+    {
+      type:'line',
+      label:'Current live reports',
+      data:yearLabels.map(label=>currentYearCounts.get(label) || 0),
+      borderColor:'#3fb950',
+      backgroundColor:'rgba(63,185,80,0.18)',
+      fill:false,
+      tension:0.3,
+      pointRadius:4,
+      pointBackgroundColor:'#3fb950',
+      pointBorderColor:'#3fb950',
+      order:1
+    }
+  ];
+  trendChart.options.plugins.legend.display = true;
+  trendChart.update();
+
+  const attackLabels = ['Kidnapping','Shooting/Killing','Armed attack','Assault','Security operations','Other'];
+  const historicalAttackCounts = countBy(awsdData, classifyHistoricalAttack);
+  const currentAttackCounts = countBy(articles, classifyLiveAttack);
+  attackDonutChart.data.labels = attackLabels;
+  attackDonutChart.data.datasets = [
+    {
+      label:'Historical incidents',
+      data:attackLabels.map(label=>historicalAttackCounts.get(label) || 0),
+      backgroundColor:'#58a6ff',
+      borderRadius:4
+    },
+    {
+      label:'Current live reports',
+      data:attackLabels.map(label=>currentAttackCounts.get(label) || 0),
+      backgroundColor:'#3fb950',
+      borderRadius:4
+    }
+  ];
+  attackDonutChart.update();
+
+  const historicalStateCounts = countBy(awsdData, item=>item.region === 'FCT' ? 'Abuja' : item.region);
+  const currentStateCounts = countBy(
+    articles
+      .map(article=>primaryStateForArticle(article))
+      .filter(Boolean)
+      .map(state=>state.state === 'FCT (Abuja)' ? 'Abuja' : state.state),
+    value=>value
+  );
+  const stateLabels = topKeysFromCounts([historicalStateCounts, currentStateCounts], 6);
+  monthBarChart.data.labels = stateLabels;
+  monthBarChart.data.datasets = [
+    {
+      label:'Historical incidents',
+      data:stateLabels.map(label=>historicalStateCounts.get(label) || 0),
+      backgroundColor:'#d29922',
+      borderRadius:4
+    },
+    {
+      label:'Current live reports',
+      data:stateLabels.map(label=>currentStateCounts.get(label) || 0),
+      backgroundColor:'#3fb950',
+      borderRadius:4
+    }
+  ];
+  monthBarChart.update();
+}
+
+async function loadLiveNews() {
+  if (newsUpdateInFlight) return;
+  newsUpdateInFlight = true;
+  liveFeedMode = liveFeedMode === 'cached' ? 'cached' : 'connecting';
+  renderLiveFeedIndicator();
+  const status = document.getElementById('liveNewsStatus');
+  const badge = document.getElementById('liveNewsBadge');
+  status.textContent = 'Checking live sources...';
+
+  let lookbackHours = 24;
+  const liveEndpoints = [
+    '/api/live-news',
+    'http://127.0.0.1:8085/api/live-news',
+    'http://localhost:8085/api/live-news',
+    'http://127.0.0.1:8081/api/live-news',
+    'http://localhost:8081/api/live-news',
+    'http://localhost:8084/api/live-news',
+    'http://localhost:8083/api/live-news',
+    'http://localhost:8082/api/live-news'
+  ];
+
+  try {
+    for (const endpoint of liveEndpoints) {
+      try {
+        const liveUrl = `${endpoint}${endpoint.includes('?') ? '&' : '?'}t=${Date.now()}`;
+        const liveResponse = await fetch(liveUrl, {cache:'no-store'});
+        if (!liveResponse.ok) continue;
+
+        const liveData = await liveResponse.json();
+        lookbackHours = Math.max(1, Number(liveData.lookbackHours) || lookbackHours);
+        const liveArticles = normalizeNewsArticles(liveData);
+        liveArticles.forEach(article=>{ article.provider = liveData.provider || article.provider; });
+        renderLiveNews(
+          liveArticles,
+          liveData.refreshedAt,
+          Math.round(LIVE_REFRESH_MS / 60000),
+          lookbackHours,
+          liveData.sourceMode || liveData.provider || 'rss'
+        );
+        liveFeedLastUpdatedAt = Date.now();
+        if (liveData.isCachedSnapshot) {
+          liveFeedMode = 'cached';
+          status.textContent = `Showing the latest cached snapshot from ${formatNewsDate(liveData.refreshedAt)} while live feeds reconnect.`;
+          badge.textContent = `RSS: cached ${liveArticles.length}`;
+          document.getElementById('liveAnalysisNote').textContent = 'Cached source leads are temporarily shown while the dashboard retries live feeds in the background.';
+          scheduleNewsRefresh(LIVE_RETRY_MS);
+        } else {
+          liveFeedMode = 'live';
+          document.getElementById('liveAnalysisNote').textContent = `RSS analysis refreshed at ${formatNewsDate(liveData.refreshedAt)}. These reports are media leads, not verified incident totals.`;
+          scheduleNewsRefresh(LIVE_REFRESH_MS);
+        }
+        renderLiveFeedIndicator();
+        return;
+      } catch (error) {
+        console.warn(`Live endpoint unavailable: ${endpoint}`, error);
+      }
+    }
+    throw new Error('No live news endpoint responded');
+  } finally {
+    newsUpdateInFlight = false;
+  }
+}
+
+function showNewsError(error) {
+  const status = document.getElementById('liveNewsStatus');
+  const badge = document.getElementById('liveNewsBadge');
+  liveFeedMode = 'retrying';
+  status.textContent = 'Live news is temporarily unavailable. Retrying automatically...';
+  badge.textContent = 'RSS: reconnecting';
+  scheduleNewsRefresh(LIVE_RETRY_MS);
+  renderLiveFeedIndicator();
+  console.error(error);
+}
+
+function setupLiveFeedListeners() {
+  window.addEventListener('focus', ()=>{ loadLiveNews().catch(showNewsError); });
+  window.addEventListener('online', ()=>{ loadLiveNews().catch(showNewsError); });
+  document.addEventListener('visibilitychange', ()=>{
+    if (!document.hidden) {
+      loadLiveNews().catch(showNewsError);
+    }
+  });
+}
+function initDashboard(data) {
+  stateData = data.stateData;
+  awsdData = data.awsdData;
+  chartData = data.charts;
+  initializeLocationAliasMap();
+  updateSummary(data.meta);
+  startLiveFeedHeartbeat();
+  setupLiveFeedListeners();
+  loadLiveNews().catch(showNewsError);
+
+// MAP
+const map=L.map('map',{center:[9.0,8.0],zoom:6,zoomControl:true});
+mapInstance = map;
+liveReportLayer = L.layerGroup().addTo(map);
+const initTile = document.documentElement.getAttribute('data-theme') === 'light' ? LIGHT_TILE : DARK_TILE;
+mainTileLayer = L.tileLayer(initTile, TILE_OPTS).addTo(map);
+
+const maxDeaths=Math.max(...stateData.map(d=>d.deaths));
+function dColor(d){return d>2000?'#f85149':d>800?'#d29922':'#58a6ff';}
+function dRadius(d){return Math.max(8,Math.sqrt(d/maxDeaths)*56);}
+function riskClass(deaths){return deaths>2000?'risk-critical':deaths>800?'risk-high':'risk-elevated';}
+function riskLabel(deaths){return deaths>2000?'CRITICAL':deaths>800?'HIGH':'ELEVATED';}
+
+let bubbleLayer=L.layerGroup();
+stateData.forEach(d=>{
+  L.circleMarker([d.lat,d.lng],{
+    radius:dRadius(d.deaths),fillColor:dColor(d.deaths),fillOpacity:0.42,
+    color:dColor(d.deaths),weight:1.5,opacity:0.85
+  }).bindPopup(`
+    <div class="popup-title">&#x1F4CD; ${d.state} State</div>
+    <div class="popup-row"><span>Total Deaths</span><span class="popup-metric-danger">${d.deaths.toLocaleString()}</span></div>
+    <div class="popup-row"><span>Incidents Logged</span><span>${d.incidents.toLocaleString()}</span></div>
+      <div class="popup-row"><span>Avg Deaths / Incident</span><span>${(d.deaths/d.incidents).toFixed(1)}</span></div>
+    <div class="popup-row"><span>Risk Level</span><span class="${riskClass(d.deaths)}">${riskLabel(d.deaths)}</span></div>
+  `).addTo(bubbleLayer);
+});
+bubbleLayer.addTo(map);
+
+function attackColor(a){
+  if(a.toLowerCase().includes('kidnap'))return'#bc8cff';
+  if(a.toLowerCase().includes('shoot')||a.toLowerCase().includes('kill')||a.toLowerCase().includes('ied')||a.toLowerCase().includes('aerial'))return'#f85149';
+  return'#d29922';
+}
+function attackClass(a){
+  if(a.toLowerCase().includes('kidnap'))return'attack-kidnap';
+  if(a.toLowerCase().includes('shoot')||a.toLowerCase().includes('kill')||a.toLowerCase().includes('ied')||a.toLowerCase().includes('aerial'))return'attack-shooting';
+  return'attack-other';
+}
+function markerClass(a){
+  if(a.toLowerCase().includes('kidnap'))return'aid-marker-kidnap';
+  if(a.toLowerCase().includes('shoot')||a.toLowerCase().includes('kill')||a.toLowerCase().includes('ied')||a.toLowerCase().includes('aerial'))return'aid-marker-shooting';
+  return'aid-marker-other';
+}
+
+let pointLayer=L.layerGroup();
+function buildPoints(data){
+  pointLayer.clearLayers();
+  data.forEach(d=>{
+    L.marker([d.lat,d.lng],{
+      icon:L.divIcon({
+        html:`<div class="aid-marker ${markerClass(d.attack)}"></div>`,
+        iconSize:[15,15],iconAnchor:[7,7],className:''
+      })
+    }).bindPopup(`
+      <div class="popup-title">&#x26A0; Aid Worker Incident - ${d.year}</div>
+      <div class="popup-row"><span>Region</span><span>${d.region}</span></div>
+      ${d.city?`<div class="popup-row"><span>Location</span><span>${d.city}</span></div>`:''}
+      <div class="popup-row"><span>Attack Type</span><span class="${attackClass(d.attack)}">${d.attack}</span></div>
+      <div class="popup-row"><span>Actor</span><span>${d.actor.replace('Non-state armed group: ','NSA: ')}</span></div>
+      <div class="popup-row"><span>Motive</span><span>${d.motive}</span></div>
+      <div class="popup-row"><span>Killed / Wounded / Kidnapped</span><span>${d.killed} / ${d.wounded} / ${d.kidnapped}</span></div>
+      ${d.details?`<div class="popup-detail">${d.details}</div>`:''}
+    `).addTo(pointLayer);
+  });
+}
+const awsd2015 = awsdData.filter(d => d.year >= 2015);
+buildPoints(awsd2015);
+pointLayer.addTo(map);
+
+let heatLayer=L.layerGroup();
+stateData.forEach(d=>{
+  for(let i=0;i<Math.min(Math.ceil(d.deaths/250),18);i++){
+    const jlat=d.lat+(Math.random()-.5)*1.8;
+    const jlng=d.lng+(Math.random()-.5)*1.8;
+    L.circleMarker([jlat,jlng],{radius:3+Math.random()*5,fillColor:'#f85149',fillOpacity:.05+Math.random()*.13,color:'transparent',weight:0}).addTo(heatLayer);
+  }
+});
+
+const checkpointData = data.checkpoints || [];
+let checkpointLayer = L.markerClusterGroup({
+  maxClusterRadius: 55,
+  spiderfyOnMaxZoom: true,
+  showCoverageOnHover: false,
+  zoomToBoundsOnClick: true,
+  iconCreateFunction: function(cluster) {
+    const count = cluster.getChildCount();
+    return L.divIcon({
+      html: `<div class="cp-cluster">${count}</div>`,
+      className: '',
+      iconSize: [34, 34],
+      iconAnchor: [17, 17]
+    });
+  }
+});
+function checkpointColor(type) {
+  if (type === 'Military') return '#4ade80';
+  if (type === 'Customs')  return '#c084fc';
+  if (type === 'Joint')    return '#fb923c';
+  return '#60a5fa'; // Police
+}
+checkpointData.forEach(cp => {
+  const color = checkpointColor(cp.type);
+  L.marker([cp.lat, cp.lng], {
+    icon: L.divIcon({
+      html: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 20" width="14" height="20">
+        <path d="M7 0C3.69 0 1 2.69 1 6c0 4.5 6 14 6 14s6-9.5 6-14c0-3.31-2.69-6-6-6z" fill="${color}" stroke="rgba(255,255,255,0.8)" stroke-width="1"/>
+        <circle cx="7" cy="6" r="2.2" fill="rgba(255,255,255,0.85)"/>
+      </svg>`,
+      iconSize: [14, 20], iconAnchor: [7, 20], popupAnchor: [0, -20], className: ''
+    })
+  }).bindPopup(`
+    <div class="popup-title">&#x1F6E1; ${escapeHtml(cp.name)}</div>
+    <div class="popup-row"><span>Type</span><span style="color:${color};font-weight:700">${escapeHtml(cp.type)}</span></div>
+    <div class="popup-row"><span>State</span><span>${escapeHtml(cp.state)}</span></div>
+    <div class="popup-row"><span>Road / Location</span><span>${escapeHtml(cp.road)}</span></div>
+    <div class="popup-row"><span>Status</span><span class="risk-elevated">${escapeHtml(cp.status)}</span></div>
+  `).addTo(checkpointLayer);
+});
+
+const layers={bubbles:bubbleLayer,points:pointLayer,heat:heatLayer,checkpoints:checkpointLayer};
+const layerState={bubbles:true,points:true,heat:false,checkpoints:false};
+function toggleLayer(btn){
+  const k=btn.dataset.layer;
+  layerState[k]=!layerState[k];
+  btn.classList.toggle('active',layerState[k]);
+  layerState[k]?layers[k].addTo(map):map.removeLayer(layers[k]);
+}
+
+document.querySelectorAll('.toggle-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>toggleLayer(btn));
+});
+
+const layerCtrl = L.control.layers(null, {
+  'Death Bubbles': bubbleLayer,
+  'Aid Worker Incidents': pointLayer,
+  'Density Scatter': heatLayer,
+  'Police & Military Checkpoints': checkpointLayer
+}, {position:'topright', collapsed:true}).addTo(map);
+
+
+document.querySelectorAll('.filter-select').forEach(select=>{
+  select.addEventListener('change',applyFilters);
+});
+
+function applyFilters(){
+  const atk=document.getElementById('attackFilter').value;
+  const yr=document.getElementById('yearFilter').value;
+  const act=document.getElementById('actorFilter').value;
+  const f=awsdData.filter(d=>{
+    let ok=true;
+    if(atk!=='all'&&d.attack!==atk)ok=false;
+    if(yr==='2015+'&&d.year<2015)ok=false;
+    if(yr==='2022+'&&d.year<2022)ok=false;
+    if(yr==='2019-2021'&&(d.year<2019||d.year>2021))ok=false;
+    if(yr==='2015-2018'&&(d.year<2015||d.year>2018))ok=false;
+    if(act==='Non-state'&&!d.actor.includes('Non-state'))ok=false;
+    if(act==='Criminal'&&!d.actor.includes('Criminal'))ok=false;
+    if(act==='Unknown'&&!d.actor.includes('Unknown'))ok=false;
+    if(act==='State'&&!d.actor.includes('Host')&&!d.actor.includes('Police')&&!d.actor.includes('paramilitary'))ok=false;
+    return ok;
+  });
+  buildPoints(f);
+  if(layerState.points)pointLayer.addTo(map);
+  const pill=document.getElementById('infoPill');
+  pill.textContent=`Showing ${f.length} aid worker incidents`;
+  setTimeout(()=>{pill.textContent='Click any marker for incident details. Scroll to zoom.';},3000);
+  buildFeed([...f].reverse());
+}
+
+// STATE BARS
+const top10=stateData.slice().sort((a,b)=>b.deaths-a.deaths).slice(0,10);
+const maxD=top10[0].deaths;
+const sbEl=document.getElementById('stateRankBars');
+function barClass(i){return i<2?'bar-critical':i<5?'bar-high':'bar-elevated';}
+top10.forEach((d,i)=>{
+  const pct=Math.round((d.deaths/maxD)*100);
+  sbEl.innerHTML+=`<div class="h-bar-row"><span class="h-bar-lbl">${d.state}</span><div class="h-bar-track"><div class="h-bar-fill ${barClass(i)}"><span class="h-bar-val">${d.deaths>=1000?(d.deaths/1000).toFixed(1)+'k':d.deaths}</span></div></div></div>`;
+  sbEl.lastElementChild.querySelector('.h-bar-fill').style.width=`${pct}%`;
+});
+
+// FEED
+function tagClass(a){
+  if(a.toLowerCase().includes('kidnap'))return'tag-kidnap';
+  if(a.toLowerCase().includes('shoot')||a.toLowerCase().includes('kill'))return'tag-shooting';
+  return'tag-other';
+}
+function buildFeed(data){
+  const feed=document.getElementById('incidentFeed');
+  feed.innerHTML='';
+  data.slice(0,25).forEach(d=>{
+    feed.innerHTML+=`<div class="inc-item">
+      <div class="inc-top"><span class="inc-region">${d.region}${d.city?', '+d.city:''}</span><span class="inc-year">${d.year}</span></div>
+      <div class="inc-detail">${d.details}</div>
+      <div class="inc-tags">
+        <span class="inc-tag ${tagClass(d.attack)}">${d.attack}</span>
+        ${d.killed>0?'<span class="inc-tag tag-killed">'+d.killed+' killed</span>':''}
+        ${d.kidnapped>0?'<span class="inc-tag tag-kidnap">'+d.kidnapped+' kidnapped</span>':''}
+      </div>
+    </div>`;
+  });
+}
+buildFeed([...awsd2015].reverse());
+
+// CHARTS
+const gc='rgba(255,255,255,0.06)',tc='#8b949e';
+Chart.defaults.font.family='Segoe UI, sans-serif';
+
+trendChart = new Chart(document.getElementById('trendChart'),{
+  type:'bar',
+  data:{labels:[],datasets:[]},
+  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,labels:{color:tc,font:{size:10}}}},scales:{x:{grid:{color:gc},ticks:{color:tc,font:{size:10}}},y:{beginAtZero:true,grid:{color:gc},ticks:{color:tc,font:{size:10},precision:0}}}}
+});
+
+attackDonutChart = new Chart(document.getElementById('attackDonut'),{
+  type:'bar',
+  data:{labels:[],datasets:[]},
+  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{color:tc,boxWidth:10,font:{size:9},padding:8}}},scales:{x:{grid:{display:false},ticks:{color:tc,font:{size:9}}},y:{beginAtZero:true,grid:{color:gc},ticks:{color:tc,font:{size:9},precision:0}}}}
+});
+
+monthBarChart = new Chart(document.getElementById('monthBar'),{
+  type:'bar',
+  data:{labels:[],datasets:[]},
+  options:{
+    responsive:true,
+    maintainAspectRatio:false,
+    onClick: (_, elements, chart)=>{
+      if (!elements.length) return;
+      const clickedLabel = chart.data.labels[elements[0].index];
+      const stateName = clickedLabel === 'Abuja' ? 'FCT (Abuja)' : clickedLabel;
+      const state = stateObjectByName(stateName);
+      const pill = document.getElementById('infoPill');
+      const mapPanel = document.querySelector('.map-center');
+      if (!state) return;
+      mapPanel?.scrollIntoView({behavior:'smooth', block:'center'});
+      focusStateOnMap(
+        state,
+        `Geographic Comparison - ${clickedLabel}`,
+        `
+          <div class="popup-row"><span>State</span><span>${escapeHtml(clickedLabel)}</span></div>
+          <div class="popup-detail">This state is currently highlighted from the Geographic Comparison chart.</div>
+        `
+      );
+      pill.textContent = `Geographic Comparison focused on ${clickedLabel}.`;
+      setTimeout(()=>{pill.textContent='Click any marker for incident details. Scroll to zoom.';},5000);
+    },
+    plugins:{legend:{display:true,labels:{color:tc,boxWidth:10,font:{size:9}}}},
+    scales:{x:{grid:{display:false},ticks:{color:tc,font:{size:9}}},y:{beginAtZero:true,grid:{color:gc},ticks:{color:tc,font:{size:9},precision:0}}}
+  }
+});
+
+updateChartsWithLiveReports(liveArticles);
+
+}
+
+loadDashboardData()
+  .then(initDashboard)
+  .catch(showLoadError);
+
+// Sync theme button state with persisted preference (maps/charts not yet ready here)
+(function() {
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  const btn = document.getElementById('themeToggleBtn');
+  if (btn) {
+    const label = document.getElementById('themeModeLabel');
+    if (label) label.textContent = isLight ? 'Light' : 'Dark';
+    btn.title = isLight ? 'Switch to dark mode' : 'Switch to light mode';
+  }
+})();
+
+// ─────────────────────────────────────────────────────────────
+//  HOTSPOT ANALYSIS
+// ─────────────────────────────────────────────────────────────
+
+let hotspotMapInstance = null;
+let hotspotInitialized = false;
+let cachedHotspots = null;
+let mainTileLayer = null;
+let hotspotTileLayer = null;
+const DARK_TILE = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+const LIGHT_TILE = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+const TILE_OPTS = { attribution: '&copy; OpenStreetMap &copy; CartoDB', subdomains: 'abcd', maxZoom: 19 };
+
+function hsRegionToState(region) {
+  if (!region || region === 'Unknown') return null;
+  if (region === 'FCT') return 'FCT (Abuja)';
+  const exact = stateData.find(s => s.state === region);
+  if (exact) return exact.state;
+  const partial = stateData.find(s => s.state.startsWith(region) || region.startsWith(s.state));
+  return partial ? partial.state : null;
+}
+
+function computeHotspots() {
+  const awsdByState = new Map();
+  awsdData.forEach(r => {
+    const stateName = hsRegionToState(r.region);
+    if (!stateName) return;
+    if (!awsdByState.has(stateName)) awsdByState.set(stateName, { count: 0, affected: 0, records: [] });
+    const entry = awsdByState.get(stateName);
+    entry.count++;
+    entry.affected += r.affected;
+    entry.records.push(r);
+  });
+
+  const maxDeaths    = Math.max(...stateData.map(s => s.deaths));
+  const maxIncidents = Math.max(...stateData.map(s => s.incidents));
+  const maxAwsd      = Math.max(...stateData.map(s => awsdByState.get(s.state)?.count || 0), 1);
+  const maxAffected  = Math.max(...stateData.map(s => awsdByState.get(s.state)?.affected || 0), 1);
+
+  return stateData.map(s => {
+    const awsd = awsdByState.get(s.state) || { count: 0, affected: 0, records: [] };
+    const deathScore    = (s.deaths     / maxDeaths)    * 100;
+    const incidentScore = (s.incidents  / maxIncidents) * 100;
+    const awsdScore     = (awsd.count   / maxAwsd)      * 100;
+    const affectedScore = (awsd.affected / maxAffected) * 100;
+    const composite = deathScore * 0.45 + incidentScore * 0.30 + awsdScore * 0.15 + affectedScore * 0.10;
+    return {
+      ...s,
+      awsdCount:    awsd.count,
+      awsdAffected: awsd.affected,
+      awsdRecords:  awsd.records,
+      composite:    Math.round(composite * 10) / 10
+    };
+  }).sort((a, b) => b.composite - a.composite);
+}
+
+function hsColor(score) {
+  if (score >= 75) return '#f85149';
+  if (score >= 50) return '#d29922';
+  if (score >= 25) return '#58a6ff';
+  return '#3fb950';
+}
+
+function hsLabel(score) {
+  if (score >= 75) return 'Critical';
+  if (score >= 50) return 'High';
+  if (score >= 25) return 'Elevated';
+  return 'Moderate';
+}
+
+function hsBadgeClass(score) {
+  if (score >= 75) return 'hs-badge-critical';
+  if (score >= 50) return 'hs-badge-high';
+  if (score >= 25) return 'hs-badge-elevated';
+  return 'hs-badge-moderate';
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = current === 'light' ? 'dark' : 'light';
+  applyTheme(next);
+  localStorage.setItem('dashboard-theme', next);
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  const btn = document.getElementById('themeToggleBtn');
+  const isLight = theme === 'light';
+  if (btn) {
+    const label = document.getElementById('themeModeLabel');
+    if (label) label.textContent = isLight ? 'Light' : 'Dark';
+    btn.title = isLight ? 'Switch to dark mode' : 'Switch to light mode';
+  }
+
+  if (mapInstance && mainTileLayer) {
+    mapInstance.removeLayer(mainTileLayer);
+    mainTileLayer = L.tileLayer(isLight ? LIGHT_TILE : DARK_TILE, TILE_OPTS).addTo(mapInstance);
+  }
+
+  if (hotspotInitialized && cachedHotspots) {
+    renderHsMap(cachedHotspots);
+    renderHsCharts(cachedHotspots);
+  }
+
+  applyThemeToCharts();
+}
+
+function applyThemeToCharts() {
+  const { tc, gc } = getChartThemeColors();
+  [trendChart, attackDonutChart, monthBarChart].forEach(chart => {
+    if (!chart) return;
+    const xs = chart.options.scales?.x;
+    const ys = chart.options.scales?.y;
+    if (xs) { if (xs.grid) xs.grid.color = gc; if (xs.ticks) xs.ticks.color = tc; }
+    if (ys) { if (ys.grid) ys.grid.color = gc; if (ys.ticks) ys.ticks.color = tc; }
+    if (chart.options.plugins?.legend?.labels) chart.options.plugins.legend.labels.color = tc;
+    chart.update('none');
+  });
+}
+
+function toggleHamburgerMenu() {
+  const dropdown = document.getElementById('hamburgerDropdown');
+  const btn = document.getElementById('hamburgerBtn');
+  const isOpen = dropdown.classList.contains('open');
+  dropdown.classList.toggle('open', !isOpen);
+  btn.classList.toggle('active', !isOpen);
+}
+
+function closeHamburgerMenu() {
+  document.getElementById('hamburgerDropdown').classList.remove('open');
+  document.getElementById('hamburgerBtn').classList.remove('active');
+}
+
+document.addEventListener('click', function(e) {
+  const menu = document.getElementById('hamburgerMenu');
+  if (menu && !menu.contains(e.target)) closeHamburgerMenu();
+});
+
+function openHotspotView() {
+  document.querySelector('.layout').style.display = 'none';
+  document.getElementById('topbarDashboardInfo').style.display = 'none';
+  document.getElementById('menuDashboardItems').style.display = 'none';
+  document.getElementById('topbarHotspotInfo').style.display = '';
+  document.getElementById('menuHotspotItems').style.display = '';
+  const view = document.getElementById('hotspotView');
+  view.style.display = 'block';
+  if (!hotspotInitialized) {
+    initHotspotView();
+    hotspotInitialized = true;
+  } else if (hotspotMapInstance) {
+    setTimeout(() => hotspotMapInstance.invalidateSize(), 120);
+  }
+}
+
+function closeHotspotView() {
+  document.getElementById('hotspotView').style.display = 'none';
+  document.querySelector('.layout').style.display = window.innerWidth <= 768 ? 'flex' : 'grid';
+  document.getElementById('topbarHotspotInfo').style.display = 'none';
+  document.getElementById('menuHotspotItems').style.display = 'none';
+  document.getElementById('topbarDashboardInfo').style.display = '';
+  document.getElementById('menuDashboardItems').style.display = '';
+}
+
+function initHotspotView() {
+  cachedHotspots = computeHotspots();
+  renderHsKPIs(cachedHotspots);
+  renderHsMap(cachedHotspots);
+  renderHsCharts(cachedHotspots);
+  renderHsTable(cachedHotspots);
+}
+
+function renderHsKPIs(hotspots) {
+  const container = document.getElementById('hsTopStates');
+  container.innerHTML = hotspots.slice(0, 5).map((s, i) => {
+    const color = hsColor(s.composite);
+    return `<div class="hs-kpi-card">
+      <div class="hs-kpi-accent" style="background:${color}"></div>
+      <div class="hs-kpi-rank">#${i + 1} Hotspot</div>
+      <div class="hs-kpi-state">${escapeHtml(s.state)}</div>
+      <div class="hs-kpi-score" style="color:${color}">${s.composite.toFixed(1)}</div>
+      <div class="hs-kpi-score-label">Risk Score / 100</div>
+      <div class="hs-kpi-detail">${s.deaths.toLocaleString()} deaths<br>${s.incidents.toLocaleString()} incidents<br>${s.awsdCount} aid worker incidents</div>
+      <span class="hs-kpi-badge ${hsBadgeClass(s.composite)}">${hsLabel(s.composite)}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderHsMap(hotspots) {
+  if (hotspotMapInstance) { hotspotMapInstance.remove(); hotspotMapInstance = null; }
+
+  hotspotMapInstance = L.map('hotspotMap', { center: [9.0, 8.0], zoom: 6, zoomControl: true });
+  const hsTile = document.documentElement.getAttribute('data-theme') === 'light' ? LIGHT_TILE : DARK_TILE;
+  hotspotTileLayer = L.tileLayer(hsTile, TILE_OPTS).addTo(hotspotMapInstance);
+
+  const maxScore = hotspots[0].composite;
+  hotspots.forEach(s => {
+    const color  = hsColor(s.composite);
+    const radius = Math.max(12, (s.composite / maxScore) * 60);
+
+    // Outer glow
+    L.circleMarker([s.lat, s.lng], {
+      radius: radius + 10, fillColor: color, fillOpacity: 0.07,
+      color: color, weight: 1, opacity: 0.2
+    }).addTo(hotspotMapInstance);
+
+    // Main zone
+    L.circleMarker([s.lat, s.lng], {
+      radius, fillColor: color, fillOpacity: 0.38,
+      color: color, weight: 2, opacity: 0.9
+    }).bindPopup(`
+      <div class="popup-title">&#x1F525; ${escapeHtml(s.state)}</div>
+      <div class="popup-row"><span>Risk Score</span><span style="color:${color};font-size:15px;font-weight:700">${s.composite.toFixed(1)}</span></div>
+      <div class="popup-row"><span>Risk Level</span><span style="color:${color};font-weight:600">${hsLabel(s.composite)}</span></div>
+      <div class="popup-row"><span>Total Deaths</span><span class="popup-metric-danger">${s.deaths.toLocaleString()}</span></div>
+      <div class="popup-row"><span>Incidents</span><span>${s.incidents.toLocaleString()}</span></div>
+      <div class="popup-row"><span>Aid Worker Incidents</span><span>${s.awsdCount}</span></div>
+      <div class="popup-row"><span>Aid Workers Affected</span><span>${s.awsdAffected}</span></div>
+    `).addTo(hotspotMapInstance);
+  });
+
+  // Map legend
+  const legend = L.control({ position: 'bottomleft' });
+  legend.onAdd = () => {
+    const div = L.DomUtil.create('div');
+    const lt = document.documentElement.getAttribute('data-theme') === 'light';
+    const lgBg  = lt ? 'rgba(204,225,247,0.96)' : 'rgba(13,17,23,0.92)';
+    const lgBdr = lt ? 'rgba(10,50,110,0.20)' : 'rgba(255,255,255,0.14)';
+    const lgHd  = lt ? '#2d5882' : '#8b949e';
+    const lgTxt = lt ? '#0d2647' : '#e6edf3';
+    const lgSub = lt ? '#2d5882' : '#6e7681';
+    const lgDiv = lt ? 'rgba(10,50,110,0.12)' : 'rgba(255,255,255,0.08)';
+    div.style.cssText = `background:${lgBg};border:1px solid ${lgBdr};border-radius:10px;padding:10px 14px;font-family:Segoe UI,sans-serif;`;
+    div.innerHTML = `
+      <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:${lgHd};margin-bottom:8px;">Risk Level</div>
+      ${[['#f85149','Critical (≥75)'],['#d29922','High (≥50)'],['#58a6ff','Elevated (≥25)'],['#3fb950','Moderate (<25)']].map(([c, l]) => `
+        <div style="display:flex;align-items:center;gap:7px;margin-bottom:4px;font-size:10px;color:${lgTxt};">
+          <div style="width:11px;height:11px;border-radius:50%;background:${c};flex-shrink:0;"></div>${l}
+        </div>`).join('')}
+      <div style="font-size:9px;color:${lgSub};margin-top:6px;border-top:1px solid ${lgDiv};padding-top:6px;">Circle size ∝ risk score</div>
+    `;
+    return div;
+  };
+  legend.addTo(hotspotMapInstance);
+  setTimeout(() => hotspotMapInstance.invalidateSize(), 200);
+}
+
+function getChartThemeColors() {
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  return {
+    tc: isLight ? '#4a5568' : '#8b949e',
+    gc: isLight ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.06)'
+  };
+}
+
+function renderHsCharts(hotspots) {
+  const { tc, gc } = getChartThemeColors();
+
+  // ① Risk score bar chart — top 10 states
+  const top10 = hotspots.slice(0, 10);
+  const existingRisk = Chart.getChart('hsRiskChart');
+  if (existingRisk) existingRisk.destroy();
+  new Chart(document.getElementById('hsRiskChart'), {
+    type: 'bar',
+    data: {
+      labels: top10.map(s => s.state === 'FCT (Abuja)' ? 'Abuja' : s.state),
+      datasets: [{
+        label: 'Risk Score',
+        data: top10.map(s => s.composite),
+        backgroundColor: top10.map(s => hsColor(s.composite) + 'aa'),
+        borderColor:     top10.map(s => hsColor(s.composite)),
+        borderWidth: 1, borderRadius: 4
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: tc, font: { size: 9 } } },
+        y: { beginAtZero: true, max: 100, grid: { color: gc }, ticks: { color: tc, font: { size: 9 } } }
+      }
+    }
+  });
+
+  // ② Actor breakdown doughnut — top 5 hotspot states
+  const top5States = new Set(hotspots.slice(0, 5).map(s => s.state));
+  const top5Records = awsdData.filter(r => {
+    const sn = hsRegionToState(r.region);
+    return sn && top5States.has(sn);
+  });
+  const actorMap = new Map();
+  top5Records.forEach(r => {
+    let actor = r.actor;
+    if (actor.includes('Non-state armed group')) actor = 'Non-state Armed Group';
+    else if (actor.includes('Criminal'))          actor = 'Criminal';
+    else if (actor.includes('Host state') || actor.includes('paramilitary')) actor = 'State / Military';
+    else if (actor.includes('Staff'))             actor = 'Internal';
+    else                                          actor = 'Unknown';
+    actorMap.set(actor, (actorMap.get(actor) || 0) + 1);
+  });
+  const actorColors = {
+    'Non-state Armed Group': '#f85149', Criminal: '#d29922',
+    'State / Military': '#58a6ff', Internal: '#bc8cff', Unknown: '#8b949e'
+  };
+  const actorLabels = [...actorMap.keys()];
+  const existingActor = Chart.getChart('hsActorChart');
+  if (existingActor) existingActor.destroy();
+  new Chart(document.getElementById('hsActorChart'), {
+    type: 'doughnut',
+    data: {
+      labels: actorLabels,
+      datasets: [{
+        data: actorLabels.map(l => actorMap.get(l)),
+        backgroundColor: actorLabels.map(l => (actorColors[l] || '#8b949e') + 'cc'),
+        borderColor:     actorLabels.map(l =>  actorColors[l] || '#8b949e'),
+        borderWidth: 1.5
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'right', labels: { color: tc, font: { size: 9 }, boxWidth: 10, padding: 6 } }
+      }
+    }
+  });
+
+  // ③ Annual aid-worker incident trend — top 3 states
+  const top3 = hotspots.slice(0, 3);
+  const years = [...new Set(awsdData.map(r => r.year))].sort((a, b) => a - b);
+  const trendPalette = ['#f85149', '#d29922', '#58a6ff'];
+  const existingTrend = Chart.getChart('hsTrendChart');
+  if (existingTrend) existingTrend.destroy();
+  new Chart(document.getElementById('hsTrendChart'), {
+    type: 'line',
+    data: {
+      labels: years,
+      datasets: top3.map((s, i) => {
+        const regionKey = s.state === 'FCT (Abuja)' ? 'FCT' : s.state;
+        const yearCounts = new Map();
+        awsdData.filter(r => r.region === regionKey || r.region === s.state)
+                .forEach(r => yearCounts.set(r.year, (yearCounts.get(r.year) || 0) + 1));
+        return {
+          label: s.state === 'FCT (Abuja)' ? 'Abuja' : s.state,
+          data: years.map(y => yearCounts.get(y) || 0),
+          borderColor: trendPalette[i],
+          backgroundColor: trendPalette[i] + '22',
+          fill: true, tension: 0.3, pointRadius: 2,
+          pointBackgroundColor: trendPalette[i]
+        };
+      })
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'top', labels: { color: tc, font: { size: 9 }, boxWidth: 10, padding: 6 } } },
+      scales: {
+        x: { grid: { color: gc }, ticks: { color: tc, font: { size: 9 }, maxTicksLimit: 8 } },
+        y: { beginAtZero: true, grid: { color: gc }, ticks: { color: tc, font: { size: 9 }, precision: 0 } }
+      }
+    }
+  });
+}
+
+function renderHsTable(hotspots) {
+  const maxScore = hotspots[0].composite;
+  document.getElementById('hsRankTable').innerHTML = `
+    <thead><tr>
+      <th>#</th><th>State</th><th style="min-width:180px">Risk Score</th>
+      <th>Level</th><th>Deaths</th><th>Incidents</th>
+      <th>AWSD Incidents</th><th>Workers Affected</th>
+    </tr></thead>
+    <tbody>
+      ${hotspots.map((s, i) => {
+        const color = hsColor(s.composite);
+        const pct   = Math.round((s.composite / maxScore) * 100);
+        return `<tr>
+          <td style="color:var(--text3)">${i + 1}</td>
+          <td style="font-weight:600">${escapeHtml(s.state)}</td>
+          <td>
+            <div class="hs-score-bar">
+              <span class="hs-score-val" style="color:${color}">${s.composite.toFixed(1)}</span>
+              <div class="hs-score-track">
+                <div class="hs-score-fill" style="width:${pct}%;background:${color}"></div>
+              </div>
+            </div>
+          </td>
+          <td><span class="hs-kpi-badge ${hsBadgeClass(s.composite)}">${hsLabel(s.composite)}</span></td>
+          <td style="color:var(--red)">${s.deaths.toLocaleString()}</td>
+          <td>${s.incidents.toLocaleString()}</td>
+          <td>${s.awsdCount}</td>
+          <td>${s.awsdAffected}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>`;
+}
+
+// ════════════════════════════════════════════════════════════════
+//  REPORTS VIEWER
+// ════════════════════════════════════════════════════════════════
+
+let reportsViewerData = [];
+let rvDetailMap = null;
+let userReportLayer = null;
+let currentDetailReport = null;
+
+function openReportsViewer() {
+  const modal = document.getElementById('reportsViewerModal');
+  if (!modal) return;
+  modal.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  loadReports();
+}
+
+function closeReportsViewer() {
+  const modal = document.getElementById('reportsViewerModal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function rvHandleBackdrop(event) {
+  if (event.target === document.getElementById('reportsViewerModal')) closeReportsViewer();
+}
+
+async function loadReports() {
+  const list = document.getElementById('rvList');
+  const countEl = document.getElementById('rvCount');
+  list.innerHTML = '<div class="rv-state-msg"><i class="ti ti-loader-2 ti-spin"></i><span>Loading reports&hellip;</span></div>';
+  if (countEl) countEl.textContent = '';
+  closeReportDetail();
+  try {
+    const res = await fetch('/api/reports');
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    const data = await res.json();
+    reportsViewerData = data.reports || [];
+    const n = reportsViewerData.length;
+    if (countEl) countEl.textContent = n + ' report' + (n !== 1 ? 's' : '');
+    const badge = document.getElementById('rvMenuBadge');
+    if (badge) { badge.textContent = n; badge.style.display = n ? 'inline-flex' : 'none'; }
+    renderReportsList(reportsViewerData);
+  } catch (err) {
+    if (countEl) countEl.textContent = 'Error loading';
+    list.innerHTML = '<div class="rv-state-msg rv-error-msg"><i class="ti ti-alert-triangle"></i><span>Could not load reports: ' + escapeHtml(err.message) + '</span></div>';
+  }
+}
+
+const RV_CAT_ICON = {
+  Shooting: 'ti-crosshair', Kidnapping: 'ti-lock', Robbery: 'ti-shield-off',
+  Checkpoint: 'ti-road', 'Communal Clash': 'ti-users', Protest: 'ti-speakerphone', Other: 'ti-help'
+};
+const RV_SEV_CLASS = { Low: 'rv-sev-low', Medium: 'rv-sev-med', High: 'rv-sev-high', Critical: 'rv-sev-crit' };
+
+function renderReportsList(reports) {
+  const list = document.getElementById('rvList');
+  if (!reports.length) {
+    list.innerHTML = '<div class="rv-state-msg"><i class="ti ti-inbox"></i><span>No reports submitted yet.</span></div>';
+    return;
+  }
+  list.innerHTML = reports.map((r, i) => renderReportCard(r, i)).join('');
+  list.querySelectorAll('.rv-card').forEach(card => {
+    card.addEventListener('click', () => openReportDetail(reportsViewerData[Number(card.dataset.index)]));
+  });
+}
+
+function renderReportCard(r, index) {
+  const d = new Date(r.receivedAt);
+  const dateStr = isNaN(d) ? r.receivedAt : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const sevCls  = RV_SEV_CLASS[r.severity] || 'rv-sev-med';
+  const catIco  = RV_CAT_ICON[r.category]  || 'ti-help';
+  const hasLoc  = r.location && r.location.shared && r.location.lat != null;
+  const files   = r.files || [];
+  const imgs    = files.filter(f => (f.contentType || '').startsWith('image/')).length;
+  const vids    = files.filter(f => (f.contentType || '').startsWith('video/')).length;
+  const fp      = [imgs ? imgs + ' photo' + (imgs > 1 ? 's' : '') : '', vids ? vids + ' video' + (vids > 1 ? 's' : '') : ''].filter(Boolean).join(', ');
+  return `<div class="rv-card" data-index="${index}">
+    <div class="rv-card-head">
+      <div class="rv-card-badges">
+        <span class="rv-cat-badge"><i class="ti ${catIco}"></i> ${escapeHtml(r.category || 'Unknown')}</span>
+        <span class="rv-sev-badge ${sevCls}">${escapeHtml(r.severity || '')}</span>
+      </div>
+      <span class="rv-date">${escapeHtml(dateStr)}</span>
+    </div>
+    <div class="rv-message">${escapeHtml(r.message || '')}</div>
+    <div class="rv-meta-row">
+      <span class="rv-meta-item${hasLoc ? ' rv-has-loc' : ''}">
+        <i class="ti ${hasLoc ? 'ti-map-pin' : 'ti-map-pin-off'}"></i>
+        ${hasLoc ? r.location.lat.toFixed(4) + '&deg;N, ' + r.location.lon.toFixed(4) + '&deg;E' : 'No location'}
+      </span>
+      ${fp ? `<span class="rv-meta-item rv-has-files"><i class="ti ti-paperclip"></i> ${fp}</span>` : ''}
+    </div>
+  </div>`;
+}
+
+function openReportDetail(r) {
+  currentDetailReport = r;
+  document.getElementById('rvListView').style.display = 'none';
+  const detailView = document.getElementById('rvDetailView');
+  detailView.style.display = 'block';
+  const d = new Date(r.receivedAt);
+  const dateStr = isNaN(d) ? r.receivedAt : d.toLocaleString();
+  const catIco  = RV_CAT_ICON[r.category]  || 'ti-help';
+  const sevCls  = RV_SEV_CLASS[r.severity] || 'rv-sev-med';
+  const hasLoc  = r.location && r.location.shared && r.location.lat != null;
+  const files   = r.files || [];
+
+  const mapHtml = hasLoc ? `
+    <div class="rv-detail-section">
+      <div class="rv-detail-label">Incident Location</div>
+      <div id="rvDetailMapEl" class="rv-detail-mini-map"></div>
+      <button class="lr-btn lr-btn-primary rv-show-map-btn"
+        onclick="showReportOnDashboard(${r.location.lat},${r.location.lon},'${escapeHtml(r.category || '')}','${escapeHtml(r.id || '')}')">
+        <i class="ti ti-map-pin"></i> Show on Dashboard Map
+      </button>
+    </div>` : '';
+
+  const mediaHtml = files.length ? `
+    <div class="rv-detail-section">
+      <div class="rv-detail-label">Attached Media (${files.length})</div>
+      <div class="rv-media-grid">
+        ${files.map(f => {
+          const url = '/api/reports/' + encodeURIComponent(r.id) + '/media/' + encodeURIComponent(f.filename);
+          const isVid = (f.contentType || '').startsWith('video/');
+          return `<div class="rv-media-thumb">
+            ${isVid
+              ? `<video src="${escapeHtml(url)}" controls muted></video>`
+              : `<img src="${escapeHtml(url)}" alt="${escapeHtml(f.filename)}" loading="lazy">`}
+            <span class="rv-media-type">${isVid ? 'VIDEO' : 'PHOTO'}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : '';
+
+  document.getElementById('rvDetailBody').innerHTML = `
+    <div class="rv-detail-section">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <span class="rv-cat-badge"><i class="ti ${catIco}"></i> ${escapeHtml(r.category || 'Unknown')}</span>
+        <span class="rv-sev-badge ${sevCls}">${escapeHtml(r.severity || '')}</span>
+        <span style="font-size:10px;color:var(--text3);margin-left:auto">${escapeHtml(dateStr)}</span>
+      </div>
+    </div>
+    <div class="rv-detail-section">
+      <div class="rv-detail-label">Incident Description</div>
+      <div class="rv-detail-msg">${escapeHtml(r.message || '(no description)')}</div>
+    </div>
+    ${mapHtml}
+    ${mediaHtml}
+    <div class="rv-detail-section">
+      <div class="rv-detail-label">Report ID</div>
+      <div style="font-size:10px;color:var(--text3);font-family:monospace">${escapeHtml(r.id || '')}</div>
+    </div>
+    <div class="rv-detail-section rv-actions-section">
+      <div class="rv-detail-label">Actions</div>
+      <div class="rv-actions-row">
+        <button class="rv-action-btn rv-edit-btn" onclick="startEditReport()">
+          <i class="ti ti-pencil"></i> Edit Report
+        </button>
+        <button class="rv-action-btn rv-delete-btn" onclick="confirmDeleteReport('${escapeHtml(r.id || '')}')">
+          <i class="ti ti-trash"></i> Delete Report
+        </button>
+      </div>
+    </div>`;
+
+  if (hasLoc) {
+    setTimeout(() => initRvDetailMap(r.location.lat, r.location.lon), 120);
+  }
+  detailView.scrollTop = 0;
+}
+
+function startEditReport() {
+  const r = currentDetailReport;
+  if (!r) return;
+  if (rvDetailMap) { rvDetailMap.remove(); rvDetailMap = null; }
+  const cats = ['Shooting','Kidnapping','Robbery','Checkpoint','Communal Clash','Protest','Other'];
+  const sevs = ['Low','Medium','High','Critical'];
+  document.getElementById('rvDetailBody').innerHTML = `
+    <div class="rv-edit-form">
+      <div class="rv-detail-section">
+        <div class="rv-detail-label">Category</div>
+        <select id="editCategory" class="rv-edit-select">
+          ${cats.map(c => `<option value="${c}"${r.category === c ? ' selected' : ''}>${c}</option>`).join('')}
+        </select>
+      </div>
+      <div class="rv-detail-section">
+        <div class="rv-detail-label">Severity</div>
+        <select id="editSeverity" class="rv-edit-select">
+          ${sevs.map(s => `<option value="${s}"${r.severity === s ? ' selected' : ''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="rv-detail-section">
+        <div class="rv-detail-label">Description <span style="color:var(--red)">*</span></div>
+        <textarea id="editMessage" class="rv-edit-textarea" rows="6" maxlength="1000">${escapeHtml(r.message || '')}</textarea>
+      </div>
+      <div class="rv-edit-actions">
+        <button id="rvSaveBtn" class="rv-action-btn rv-save-btn" onclick="saveReportEdit('${escapeHtml(r.id || '')}')">
+          <i class="ti ti-device-floppy"></i> Save Changes
+        </button>
+        <button class="rv-action-btn rv-cancel-btn" onclick="openReportDetail(currentDetailReport)">
+          <i class="ti ti-x"></i> Cancel
+        </button>
+      </div>
+    </div>`;
+}
+
+async function saveReportEdit(id) {
+  const category = document.getElementById('editCategory').value;
+  const severity = document.getElementById('editSeverity').value;
+  const message  = (document.getElementById('editMessage').value || '').trim();
+  if (!message) { alert('Description is required.'); return; }
+  const btn = document.getElementById('rvSaveBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader-2 ti-spin"></i> Saving&hellip;';
+  try {
+    const res = await fetch('/api/reports/' + encodeURIComponent(id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category, severity, message })
+    });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    const idx = reportsViewerData.findIndex(r => r.id === id);
+    if (idx !== -1) {
+      reportsViewerData[idx].category = category;
+      reportsViewerData[idx].severity = severity;
+      reportsViewerData[idx].message  = message;
+      currentDetailReport = reportsViewerData[idx];
+    }
+    openReportDetail(currentDetailReport);
+  } catch (err) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-device-floppy"></i> Save Changes';
+    alert('Save failed: ' + err.message);
+  }
+}
+
+async function confirmDeleteReport(id) {
+  if (!confirm('Delete this report permanently? This cannot be undone.')) return;
+  const btn = document.querySelector('.rv-delete-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2 ti-spin"></i> Deleting&hellip;'; }
+  try {
+    const res = await fetch('/api/reports/' + encodeURIComponent(id), { method: 'DELETE' });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    reportsViewerData = reportsViewerData.filter(r => r.id !== id);
+    currentDetailReport = null;
+    const n = reportsViewerData.length;
+    const countEl = document.getElementById('rvCount');
+    if (countEl) countEl.textContent = n + ' report' + (n !== 1 ? 's' : '');
+    const badge = document.getElementById('rvMenuBadge');
+    if (badge) { badge.textContent = n; badge.style.display = n ? 'inline-flex' : 'none'; }
+    closeReportDetail();
+    renderReportsList(reportsViewerData);
+  } catch (err) {
+    alert('Delete failed: ' + err.message);
+  }
+}
+
+function initRvDetailMap(lat, lon) {
+  if (rvDetailMap) { rvDetailMap.remove(); rvDetailMap = null; }
+  const el = document.getElementById('rvDetailMapEl');
+  if (!el) return;
+  const dark = document.documentElement.getAttribute('data-theme') !== 'light';
+  const tile = dark
+    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+    : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+  rvDetailMap = L.map('rvDetailMapEl', { zoomControl: false, attributionControl: false }).setView([lat, lon], 13);
+  L.tileLayer(tile, { maxZoom: 19 }).addTo(rvDetailMap);
+  const icon = L.divIcon({
+    className: '',
+    html: '<div style="width:16px;height:16px;background:#f85149;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 3px rgba(248,81,73,.4)"></div>',
+    iconSize: [16, 16], iconAnchor: [8, 8]
+  });
+  L.marker([lat, lon], { icon }).addTo(rvDetailMap);
+}
+
+function closeReportDetail() {
+  const lv = document.getElementById('rvListView');
+  const dv = document.getElementById('rvDetailView');
+  if (lv) lv.style.display = 'block';
+  if (dv) dv.style.display = 'none';
+  if (rvDetailMap) { rvDetailMap.remove(); rvDetailMap = null; }
+}
+
+function showReportOnDashboard(lat, lon, category, reportId) {
+  closeReportsViewer();
+  if (!mapInstance) return;
+  if (!userReportLayer) {
+    userReportLayer = L.layerGroup().addTo(mapInstance);
+  }
+  userReportLayer.clearLayers();
+  const icon = L.divIcon({
+    className: '',
+    html: '<div style="width:22px;height:22px;background:#3fb950;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 5px rgba(63,185,80,.35)"></div>',
+    iconSize: [22, 22], iconAnchor: [11, 11]
+  });
+  const marker = L.marker([lat, lon], { icon })
+    .bindPopup(`<div class="popup-title">&#128205; User Report &mdash; ${escapeHtml(category)}</div>
+      <div class="popup-row"><span>Coordinates</span><span>${lat.toFixed(5)}&deg;N, ${lon.toFixed(5)}&deg;E</span></div>
+      <div class="popup-row"><span>Report&nbsp;ID</span><span style="font-size:9px;font-family:monospace">${escapeHtml(reportId)}</span></div>`)
+    .addTo(userReportLayer);
+  mapInstance.flyTo([lat, lon], 12, { duration: 1.4 });
+  setTimeout(() => marker.openPopup(), 500);
+  const pill = document.getElementById('infoPill');
+  if (pill) {
+    pill.textContent = 'User report pinned at ' + lat.toFixed(4) + '°N, ' + lon.toFixed(4) + '°E';
+    setTimeout(() => { pill.textContent = 'Click any marker for incident details. Scroll to zoom.'; }, 6000);
+  }
+}
+
+// On resize: keep layout display value in sync with the active breakpoint
+window.addEventListener('resize', () => {
+  const layout = document.querySelector('.layout');
+  if (!layout || layout.style.display === 'none') return;
+  layout.style.display = window.innerWidth <= 768 ? 'flex' : 'grid';
+  if (mapInstance) mapInstance.invalidateSize();
+});
+
