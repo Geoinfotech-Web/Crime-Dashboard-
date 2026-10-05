@@ -1,0 +1,69 @@
+{
+  "_about": "News outlets the Travel Safety advisor reads, by geopolitical zone. 'feed' is a direct RSS feed. 'google' means the outlet has no usable feed (or blocks automated readers) and is read through a Google News query restricted to its domain. 'offline' means no working website or feed was found when this file was last checked (2026-10-05); those states are still covered by the per-state Google News query, which picks up whoever is reporting. To add an outlet, add an entry here - no code changes needed.",
+  "windowDays": 7,
+  "cacheMinutes": 10,
+  "zones": {
+    "South-South": ["Akwa Ibom", "Bayelsa", "Cross River", "Delta", "Edo", "Rivers"],
+    "South-East": ["Abia", "Anambra", "Ebonyi", "Enugu", "Imo"],
+    "South-West": ["Ekiti", "Lagos", "Ogun", "Ondo", "Osun", "Oyo"],
+    "North-Central": ["Benue", "FCT (Abuja)", "Kogi", "Kwara", "Nasarawa", "Niger", "Plateau"],
+    "North-West": ["Jigawa", "Kaduna", "Kano", "Katsina", "Kebbi", "Sokoto", "Zamfara"],
+    "North-East": ["Adamawa", "Bauchi", "Borno", "Gombe", "Taraba", "Yobe"]
+  },
+  "outlets": [
+    {"name": "The Pioneer", "scope": "regional", "states": ["Akwa Ibom"], "via": "feed", "domain": "pioneernewsng.com", "url": "https://pioneernewsng.com/feed/"},
+    {"name": "The Tide", "scope": "regional", "states": ["Rivers"], "via": "feed", "domain": "thetidenewsonline.com", "url": "https://thetidenewsonline.com/feed/"},
+    {"name": "National Wire", "scope": "regional", "states": ["Rivers", "Bayelsa"], "via": "feed", "domain": "nationalwire.com.ng", "url": "https://nationalwire.com.ng/feed/"},
+    {"name": "The Nigerian Observer", "scope": "regional", "states": ["Edo", "Delta"], "via": "feed", "domain": "nigerianobservernews.com", "url": "https://nigerianobservernews.com/feed/"},
+    {"name": "CrossRiverWatch", "scope": "regional", "states": ["Cross River"], "via": "feed", "domain": "crossriverwatch.com", "url": "https://crossriverwatch.com/feed/"},
+    {"name": "The Nigerian Chronicle", "scope": "regional", "states": ["Cross River"], "via": "offline"},
+    {"name": "New Waves", "scope": "regional", "states": ["Bayelsa"], "via": "offline"},
+
+    {"name": "The Nigerian Statesman", "scope": "regional", "states": ["Imo"], "via": "offline"},
+    {"name": "Daily Star / Weekly Star", "scope": "regional", "states": ["Enugu", "Anambra"], "via": "offline"},
+    {"name": "The Ambassador", "scope": "regional", "states": ["Abia"], "via": "offline"},
+
+    {"name": "Nigerian Tribune", "scope": "regional", "states": ["Oyo", "Ogun", "Osun", "Ondo", "Ekiti"], "via": "feed", "domain": "tribuneonlineng.com", "url": "https://tribuneonlineng.com/feed/"},
+    {"name": "PM News", "scope": "regional", "states": ["Lagos", "Ogun"], "via": "feed", "domain": "pmnewsnigeria.com", "url": "https://pmnewsnigeria.com/feed/"},
+    {"name": "Osun Defender", "scope": "regional", "states": ["Osun"], "via": "feed", "domain": "osundefender.com", "url": "https://osundefender.com/feed/"},
+    {"name": "Uhuru Times", "scope": "regional", "states": ["Ogun"], "via": "feed", "domain": "uhurutimes.com", "url": "https://uhurutimes.com/feed/"},
+    {"name": "The Hope", "scope": "regional", "states": ["Ondo", "Ekiti"], "via": "google", "domain": "thehopenewspaper.com"},
+    {"name": "Nigerian Daily Sketch", "scope": "regional", "states": ["Oyo"], "via": "offline"},
+    {"name": "The Horizon / Lagos Daily News", "scope": "regional", "states": ["Lagos"], "via": "offline"},
+
+    {"name": "ViewPoint Nigeria", "scope": "regional", "states": ["Plateau"], "via": "feed", "domain": "viewpointnigeria.org", "url": "https://viewpointnigeria.org/feed/"},
+    {"name": "Idoma Voice", "scope": "regional", "states": ["Benue"], "via": "feed", "domain": "idomavoice.com", "url": "https://idomavoice.com/feed/"},
+    {"name": "Kogi Reports", "scope": "regional", "states": ["Kogi"], "via": "feed", "domain": "kogireports.com", "url": "https://kogireports.com/feed/"},
+    {"name": "The Nigeria Standard", "scope": "regional", "states": ["Plateau", "Benue"], "via": "offline"},
+    {"name": "The Voice", "scope": "regional", "states": ["Benue"], "via": "offline"},
+    {"name": "The Graphic", "scope": "regional", "states": ["Kogi"], "via": "offline"},
+    {"name": "Newsline", "scope": "regional", "states": ["Niger"], "via": "offline"},
+    {"name": "The Herald", "scope": "regional", "states": ["Kwara"], "via": "offline"},
+
+    {"name": "Daily Nigerian", "scope": "regional", "states": ["Kano", "Jigawa", "Katsina", "Kaduna"], "via": "feed", "domain": "dailynigerian.com", "url": "https://dailynigerian.com/feed/"},
+    {"name": "Solacebase", "scope": "regional", "states": ["Kano", "Jigawa"], "via": "feed", "domain": "solacebase.com", "url": "https://solacebase.com/feed/"},
+    {"name": "Daily Reality", "scope": "regional", "states": ["Kano"], "via": "feed", "domain": "dailyrealityng.com", "url": "https://dailyrealityng.com/feed/"},
+    {"name": "Katsina Times", "scope": "regional", "states": ["Katsina", "Zamfara"], "via": "google", "domain": "katsinatimes.com"},
+    {"name": "Arewa Agenda", "scope": "regional", "states": ["Kaduna", "Kano", "Katsina", "Sokoto", "Zamfara", "Kebbi", "Bauchi", "Gombe"], "via": "feed", "domain": "arewaagenda.com", "url": "https://arewaagenda.com/feed/"},
+    {"name": "The Triumph", "scope": "regional", "states": ["Kano"], "via": "offline"},
+    {"name": "New Nigerian", "scope": "regional", "states": ["Kaduna"], "via": "offline"},
+
+    {"name": "Neptune Prime", "scope": "regional", "states": ["Yobe", "Borno"], "via": "feed", "domain": "neptuneprime.com.ng", "url": "https://neptuneprime.com.ng/feed/"},
+    {"name": "Zagazola Makama", "scope": "regional", "states": ["Borno", "Yobe", "Adamawa"], "via": "google", "domain": "zagazola.org"},
+    {"name": "HumAngle", "scope": "regional", "states": ["Borno", "Yobe", "Adamawa", "Zamfara", "Katsina"], "via": "google", "domain": "humanglemedia.com"},
+    {"name": "WikkiTimes", "scope": "regional", "states": ["Bauchi", "Gombe"], "via": "google", "domain": "wikkitimes.com"},
+    {"name": "The Trumpet", "scope": "regional", "states": ["Bauchi"], "via": "offline"},
+    {"name": "The Scope", "scope": "regional", "states": ["Adamawa"], "via": "offline"},
+
+    {"name": "Daily Trust", "scope": "national", "via": "feed", "domain": "dailytrust.com", "url": "https://dailytrust.com/feed/"},
+    {"name": "Punch", "scope": "national", "via": "feed", "domain": "punchng.com", "url": "https://punchng.com/feed/"},
+    {"name": "Vanguard", "scope": "national", "via": "feed", "domain": "vanguardngr.com", "url": "https://vanguardngr.com/feed/"},
+    {"name": "Daily Post", "scope": "national", "via": "feed", "domain": "dailypost.ng", "url": "https://dailypost.ng/feed/"},
+    {"name": "Premium Times", "scope": "national", "via": "feed", "domain": "premiumtimesng.com", "url": "https://premiumtimesng.com/feed/"},
+    {"name": "Channels TV", "scope": "national", "via": "feed", "domain": "channelstv.com", "url": "https://channelstv.com/feed/"},
+    {"name": "Leadership", "scope": "national", "via": "feed", "domain": "leadership.ng", "url": "https://leadership.ng/feed/"},
+    {"name": "Blueprint", "scope": "national", "via": "feed", "domain": "blueprint.ng", "url": "https://blueprint.ng/feed/"},
+    {"name": "ThisDay", "scope": "national", "via": "feed", "domain": "thisdaylive.com", "url": "https://thisdaylive.com/feed/"},
+    {"name": "Ripples Nigeria", "scope": "national", "via": "feed", "domain": "ripplesnigeria.com", "url": "https://ripplesnigeria.com/feed/"}
+  ]
+}
