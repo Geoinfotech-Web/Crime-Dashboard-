@@ -1338,49 +1338,39 @@ function setActiveNavTab(view) {
 }
 
 // Primary nav dispatcher. 'report' opens the modal overlay without changing
-// the underlying active tab (dashboard/hotspot stay selected beneath it).
+// the underlying active tab (dashboard/hotspot/travel stay selected beneath it).
 function navTo(view) {
   if (view === 'report') {
     if (typeof openLiveReport === 'function') openLiveReport();
     return;
   }
+  showView(view); // 'dashboard' | 'hotspot' | 'travel'
+}
+
+function showView(view) {
+  const dash = view === 'dashboard';
+  document.querySelector('.layout').style.display = dash ? (window.innerWidth <= 768 ? 'flex' : 'grid') : 'none';
+  document.querySelector('.kpi-row').style.display = dash ? '' : 'none';
+  document.querySelector('.charts-row').style.display = dash ? '' : 'none';
+  document.getElementById('hotspotView').style.display = view === 'hotspot' ? 'block' : 'none';
+  document.getElementById('travelView').classList.toggle('tv-active', view === 'travel');
+  document.getElementById('topbarDashboardInfo').style.display = dash ? '' : 'none';
+  document.getElementById('topbarHotspotInfo').style.display = view === 'hotspot' ? '' : 'none';
+  document.getElementById('topbarTravelInfo').style.display = view === 'travel' ? '' : 'none';
+  setActiveNavTab(view);
+
   if (view === 'hotspot') {
-    openHotspotView();
-  } else {
-    closeHotspotView();
+    if (!hotspotInitialized) { initHotspotView(); hotspotInitialized = true; }
+    else if (hotspotMapInstance) { setTimeout(() => hotspotMapInstance.invalidateSize(), 120); }
+  } else if (view === 'travel') {
+    if (!travelInitialized) { initTravelView(); travelInitialized = true; }
+    else if (travelMap) { setTimeout(() => { travelMap.invalidateSize(); if (tvCurrentCorridor) fitTravelBounds(); }, 120); }
   }
 }
 
-function openHotspotView() {
-  document.querySelector('.layout').style.display = 'none';
-  document.querySelector('.kpi-row').style.display = 'none';
-  document.querySelector('.charts-row').style.display = 'none';
-  document.getElementById('topbarDashboardInfo').style.display = 'none';
-  document.getElementById('menuDashboardItems').style.display = 'none';
-  document.getElementById('topbarHotspotInfo').style.display = '';
-  document.getElementById('menuHotspotItems').style.display = '';
-  setActiveNavTab('hotspot');
-  const view = document.getElementById('hotspotView');
-  view.style.display = 'block';
-  if (!hotspotInitialized) {
-    initHotspotView();
-    hotspotInitialized = true;
-  } else if (hotspotMapInstance) {
-    setTimeout(() => hotspotMapInstance.invalidateSize(), 120);
-  }
-}
-
-function closeHotspotView() {
-  document.getElementById('hotspotView').style.display = 'none';
-  document.querySelector('.layout').style.display = window.innerWidth <= 768 ? 'flex' : 'grid';
-  document.querySelector('.kpi-row').style.display = '';
-  document.querySelector('.charts-row').style.display = '';
-  document.getElementById('topbarHotspotInfo').style.display = 'none';
-  document.getElementById('menuHotspotItems').style.display = 'none';
-  document.getElementById('topbarDashboardInfo').style.display = '';
-  document.getElementById('menuDashboardItems').style.display = '';
-  setActiveNavTab('dashboard');
-}
+function openHotspotView() { showView('hotspot'); }
+function closeHotspotView() { showView('dashboard'); }
+function openTravelView() { showView('travel'); }
 
 function initHotspotView() {
   cachedHotspots = computeHotspots();
