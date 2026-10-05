@@ -422,6 +422,40 @@
   .tv-rec-src{display:block;margin-top:4px;font-size:10.5px;color:var(--text3);}
   .tv-inline-btn{background:none;border:1px solid var(--border2);color:var(--blue);font:inherit;font-weight:600;border-radius:7px;padding:3px 9px;margin-left:4px;cursor:pointer;}
 
+  /* ── TRAVEL: ROUTE OPTIONS ───────────────────────────────── */
+  .tv-swap{align-self:flex-end;display:flex;align-items:center;gap:5px;margin:-6px 0 2px auto;background:none;border:1px solid var(--border2);border-radius:8px;color:var(--text2);font:inherit;font-size:11px;font-weight:600;padding:3px 9px;cursor:pointer;}
+  .tv-swap:hover{color:var(--blue);border-color:var(--blue);}
+  .tv-options{display:flex;flex-direction:column;gap:8px;}
+  .tv-options:empty{display:none;}
+  .tv-option{--lv:var(--blue);display:flex;flex-direction:column;gap:6px;text-align:left;font:inherit;color:var(--text);background:var(--bg2);border:1px solid var(--border);border-left:3px solid var(--lv);border-radius:12px;padding:10px 12px;cursor:pointer;transition:border-color .15s,background .15s;}
+  .tv-option.is-crit{--lv:var(--red);}
+  .tv-option.is-high{--lv:var(--orange);}
+  .tv-option.is-mod{--lv:var(--blue);}
+  .tv-option.is-low{--lv:var(--green);}
+  .tv-option:hover{border-color:var(--border2);border-left-color:var(--lv);}
+  .tv-option.active{background:var(--bg-sel);border-color:var(--lv);box-shadow:0 0 0 1px var(--lv) inset;}
+  .tv-option-top{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+  .tv-option-tag{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--lv);}
+  .tv-option-score{font-size:19px;font-weight:800;line-height:1;color:var(--lv);}
+  .tv-option-score em{font-style:normal;font-size:10px;font-weight:600;color:var(--text3);margin-left:2px;}
+  .tv-option-road{font-size:12.5px;font-weight:700;line-height:1.35;}
+  .tv-option-facts{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11px;color:var(--text2);}
+  .tv-option-facts span{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;}
+  .tv-option-facts i{font-size:13px;color:var(--text3);}
+  .tv-option-facts em{font-style:normal;color:var(--orange);}
+  .tv-option-facts .is-bad,.tv-option-facts .is-bad i{color:var(--red);}
+  .tv-option-news{font-size:10.5px;color:var(--text3);display:inline-flex;align-items:center;gap:5px;}
+  .tv-option-news b{color:var(--red);}
+  .tv-spin{animation:tvSpin 1s linear infinite;}
+  .tv-metrics{grid-template-columns:1fr 1fr;}
+  .tv-legs{margin-top:12px;padding-top:11px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:5px;}
+  .tv-leg{display:flex;justify-content:space-between;gap:10px;font-size:11px;color:var(--text2);}
+  .tv-leg span:last-child{color:var(--text3);white-space:nowrap;}
+  .tv-town.is-junction{font-weight:800;}
+  .tv-town.is-junction .tv-town-dot{width:11px;height:11px;border-color:#2e8fff;}
+  [data-theme="light"] .tv-option{background:#cce1f7;border-color:rgba(10,50,110,0.14);border-left-color:var(--lv);}
+  [data-theme="light"] .tv-option.active{background:#b3d0ee;border-color:var(--lv);}
+
   /* ── TRAVEL: MAP + NEWS COLUMN ───────────────────────────── */
   .tv-center{gap:12px;}
   .tv-map-card{flex:1 1 56%;min-height:260px;display:flex;flex-direction:column;}
@@ -431,6 +465,8 @@
   .tv-town.has-news{pointer-events:auto;cursor:pointer;color:#fff;background:rgba(255,90,95,0.92);padding:2px 8px 2px 4px;border-radius:11px;text-shadow:none;transform:translate(-9px,-50%);box-shadow:0 2px 10px rgba(255,90,95,.5);}
   .tv-town.has-news .tv-town-dot{background:#fff;border-color:#fff;}
   .tv-town.has-news b{background:rgba(0,0,0,.28);border-radius:8px;padding:0 5px;font-size:10px;}
+  /* Top right, out of the way of the route, which usually starts lower left. */
+  .tv-legend{left:auto;right:12px;bottom:auto;top:12px;}
   .tv-leg-news{width:17px;height:9px;border-radius:5px;background:var(--red);flex-shrink:0;}
   [data-theme="light"] .tv-town{color:#0d2647;text-shadow:0 0 4px rgba(255,255,255,.95);}
   [data-theme="light"] .tv-town-dot{background:#fff;border-color:#0d2647;}

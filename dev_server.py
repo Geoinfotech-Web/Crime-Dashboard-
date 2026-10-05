@@ -522,6 +522,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 Path(self.directory),
                 states=values("states"),
                 places=values("places"),
+                hubs=values("hubs"),
                 label=(query.get("label", [""])[0])[:80],
                 days=(query.get("days", [None])[0]),
             )

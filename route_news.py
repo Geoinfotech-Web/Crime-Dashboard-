@@ -26,7 +26,8 @@ from urllib.request import Request, urlopen
 SOURCES_FILE = "regional_sources.json"
 FETCH_TIMEOUT = 8
 MAX_WORKERS = 10
-MAX_STATES = 6
+MAX_STATES = 14
+MAX_PLACES = 16
 # Pressure at which the live index reaches about 63 of 100.
 PRESSURE_SCALE = 12
 GOOGLE_NEWS = "https://news.google.com/rss/search?q={query}&hl=en-NG&gl=NG&ceid=NG:en"
@@ -100,6 +101,14 @@ TOWNS = {
     "Taraba": ["Jalingo", "Wukari", "Takum"], "Yobe": ["Damaturu", "Potiskum", "Geidam", "Buni Yadi"],
     "Zamfara": ["Gusau", "Tsafe", "Talata Mafara", "Anka", "Maru", "Shinkafi"],
 }
+# Town names that are also everyday words or people's names ("okada riders",
+# "Isa Pantami", "iron ore"). They only count when the sentence treats them
+# as a place: "in Ore", "Benin-Ore road", "Okada junction".
+AMBIGUOUS_PLACES = {"Ore", "Okada", "Aba", "Isa", "Toro", "Bori", "Jere", "Owo", "Itu", "Auno",
+                    "Mowe", "Ifon", "Kura", "Maru", "Anka", "Offa", "Epe", "Bida"}
+PLACE_BEFORE = r"(?:\b(?:in|at|near|around|along|from|to|of|outside)\s+|-)"
+PLACE_AFTER = r"(?:-|,|\s+(?i:road|town|junction|axis|community|area|expressway|highway|bridge|lga|council|forest))"
+
 STOPWORDS = set(
     "the a an and or of in on at to for from by with as is are was were be been after before over into "
     "amid says say said new news nigeria nigerian state govt government police army troops officials "
@@ -119,6 +128,13 @@ def _word_pattern(term: str):
     return re.compile(r"(?<![A-Za-z])" + re.escape(term).replace(r"\ ", r"[\s-]+") + r"(?![A-Za-z])", re.I)
 
 
+def _place_pattern(name: str):
+    if name not in AMBIGUOUS_PLACES:
+        return _word_pattern(name)
+    core = re.escape(name)
+    return re.compile(f"{PLACE_BEFORE}{core}(?![A-Za-z])|(?<![A-Za-z]){core}{PLACE_AFTER}")
+
+
 def _state_patterns(state: str):
     """Patterns that place a headline in a state: its name, then its towns."""
     name = "Abuja" if state == "FCT (Abuja)" else state
@@ -128,7 +144,7 @@ def _state_patterns(state: str):
         patterns = [re.compile(r"(?<![A-Za-z])(?<!Niger )" + name + r"(?![A-Za-z])(?! (?:Delta|Republic|River))")]
     else:
         patterns = [_word_pattern(name)]
-    patterns.extend(_word_pattern(town) for town in TOWNS.get(state, []))
+    patterns.extend(_place_pattern(town) for town in TOWNS.get(state, []))
     return patterns
 
 
@@ -241,10 +257,11 @@ def _plan(sources, states, places, label, days):
                       "via": "search", "domain": "", "stateHint": state},
                      _google_url(f"{phrase} {incident_terms} when:{days}d")))
 
-    if places:
-        quoted = " OR ".join(f'"{place}"' for place in places[:8])
-        jobs.append(({"name": "Google News · towns on route", "scope": "search", "states": [],
-                      "via": "search", "domain": ""},
+    # A search can only hold so many names, so a long route asks twice.
+    for start in range(0, len(places), 8):
+        quoted = " OR ".join(f'"{place}"' for place in places[start:start + 8])
+        jobs.append(({"name": "Google News · towns on route" + (f" ({start // 8 + 1})" if len(places) > 8 else ""),
+                      "scope": "search", "states": [], "via": "search", "domain": ""},
                      _google_url(f"({quoted}) {incident_terms} when:{days}d")))
     if label:
         ends = [part.strip() for part in re.split(r"→|->|-|–", label) if part.strip()]
@@ -291,17 +308,20 @@ def _recency(age_hours: float) -> float:
     return 0.2
 
 
-def build_route_news(root: Path, states, places=None, label="", days=None):
+def build_route_news(root: Path, states, places=None, label="", days=None, hubs=None):
     sources = _load_sources(root)
     known_states = {state for zone in sources["zones"].values() for state in zone}
     states = [state for state in dict.fromkeys(states) if state in known_states][:MAX_STATES]
-    places = [place for place in dict.fromkeys(places or []) if place][:12]
+    places = [place for place in dict.fromkeys(places or []) if place][:MAX_PLACES]
     days = max(1, min(int(days or sources.get("windowDays", 7)), 14))
     ttl = float(sources.get("cacheMinutes", 10)) * 60
     if not states:
         raise ValueError("No recognised states on this route")
 
-    route_key = json.dumps([states, places, label, days])
+    # Towns where the route changes road. A city is in the news every day, so
+    # a report only counts as "on the road" there when it is about the road.
+    hubs = set(hubs or [])
+    route_key = json.dumps([states, places, label, days, sorted(hubs)])
     cached = _results.get(route_key)
     if cached and time.time() - cached[0] < ttl:
         return cached[1]
@@ -313,7 +333,9 @@ def build_route_news(root: Path, states, places=None, label="", days=None):
     # Every other state, to recognise a headline that is plainly about
     # somewhere this road does not go.
     elsewhere = [pattern for state in known_states - set(states) for pattern in _state_patterns(state)]
-    place_patterns = {place: _word_pattern(place) for place in places}
+    place_patterns = {place: _place_pattern(place) for place in places}
+    known_domains = {outlet["domain"] for outlet in sources["outlets"] if outlet.get("domain")}
+    nigeria = re.compile(r"\bNigeria", re.I)
 
     jobs = _plan(sources, states, places, label, days)
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -352,11 +374,15 @@ def build_route_news(root: Path, states, places=None, label="", days=None):
                          if any(pattern.search(sample) for pattern in patterns)])
 
             hit_places, hit_states = locate(title)
+            road = bool(ROAD_RE.search(title))
+            if not road:
+                hit_places = [place for place in hit_places if place not in hubs]
             located_by = "headline"
             if not hit_states and not hit_places:
                 if any(pattern.search(title) for pattern in elsewhere):
                     continue
                 hit_places, hit_states = locate(text[:len(title) + 220])
+                hit_places = [place for place in hit_places if place not in hubs]
                 if not hit_states and not hit_places:
                     # A search aimed at one state returns articles about that
                     # state even when the headline does not name it. Trust it less.
@@ -364,8 +390,15 @@ def build_route_news(root: Path, states, places=None, label="", days=None):
                         continue
                     hit_states, located_by = [meta["stateHint"]], "search"
 
+            # A town name on its own could be anywhere in the world. Without a
+            # state in the headline, only take it from a paper we know.
+            domain = item["publisherDomain"] or meta["domain"] or _domain(item["url"])
+            if (hit_places and not hit_states and meta["via"] == "search"
+                    and domain not in known_domains and not nigeria.search(title)):
+                continue
+
             category = _classify(title) or _classify(text)
-            road = bool(ROAD_RE.search(text))
+            road = road or bool(ROAD_RE.search(text))
             # "Crash" and "accident" are only road news when a road is involved.
             if category == "road_crash" and not road:
                 category = None
@@ -373,7 +406,6 @@ def build_route_news(root: Path, states, places=None, label="", days=None):
                 continue
             is_event = bool(EVENT_RE.search(title)) and not (CONTEXT_RE.search(title) and not road)
 
-            domain = item["publisherDomain"] or meta["domain"] or _domain(item["url"])
             outlet = regional_domains.get(domain)
             seen_urls.add(item["url"])
             matched += 1
@@ -461,6 +493,11 @@ def build_route_news(root: Path, states, places=None, label="", days=None):
                if outlet.get("via") == "offline" and set(outlet.get("states", [])) & set(states)]
     answered = [row for row in source_rows if row["ok"]]
 
+    # A route through eight states collects more headlines than one through
+    # two without being that much worse per kilometre, so the bar rises with
+    # the number of states - but slower than in proportion.
+    scale = PRESSURE_SCALE * max(1.0, len(states) / 3) ** 0.5
+
     payload = {
         "route": {"states": states, "places": places, "label": label,
                   "zones": sorted({zone_of[state] for state in states})},
@@ -469,7 +506,7 @@ def build_route_news(root: Path, states, places=None, label="", days=None):
         "cacheMinutes": ttl / 60,
         # Saturating, so the tenth report of a bad week moves the needle less
         # than the first.
-        "liveIndex": round(100 * (1 - math.exp(-pressure / PRESSURE_SCALE))),
+        "liveIndex": round(100 * (1 - math.exp(-pressure / scale))),
         "pressure": round(pressure, 2),
         "counts": {
             "reports": len(reports), "events": len(event_rows),

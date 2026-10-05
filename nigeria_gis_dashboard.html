@@ -30,7 +30,7 @@
     </div>
     <div id="topbarTravelInfo" class="brand-text" style="display:none">
       <div class="brand-name brand-name-tv"><i class="ti ti-route"></i> Travel Safety</div>
-      <div class="brand-sub">Route-risk advisor · 21 corridors · regional and national news</div>
+      <div class="brand-sub">Route-risk advisor · any town to any town · alternative routes · live news</div>
     </div>
   </div>
 
@@ -343,6 +343,7 @@
         <label class="filter-label">From</label>
         <select class="filter-select" id="tvFrom"></select>
       </div>
+      <button type="button" class="tv-swap" onclick="swapTravelEnds()" title="Swap origin and destination"><i class="ti ti-arrows-up-down"></i> Swap</button>
       <div class="filter-group">
         <label class="filter-label">To</label>
         <select class="filter-select" id="tvTo"></select>
@@ -359,10 +360,13 @@
           <button type="button" class="tv-mode" data-mode="Convoy" onclick="selectTravelMode(this)"><i class="ti ti-truck"></i><span>Convoy</span></button>
         </div>
       </div>
-      <button class="apply-btn tv-assess" onclick="assessRoute()"><i class="ti ti-shield-check"></i> Assess this route</button>
+      <button class="apply-btn tv-assess" onclick="assessRoute()"><i class="ti ti-shield-check"></i> Find and assess routes</button>
     </div>
 
-    <div class="tv-sec-label">Route risk rating</div>
+    <div class="tv-sec-label" id="tvOptionsLabel">Route</div>
+    <div class="tv-options" id="tvRouteOptions"></div>
+
+    <div class="tv-sec-label">Selected route</div>
     <div class="panel-card tv-rating-card" id="tvRatingCard">
       <div class="tv-empty">Select a route and tap <strong>Assess this route</strong>.</div>
     </div>
@@ -382,7 +386,7 @@
           <div class="leg-row"><span class="tv-leg-line tv-leg-low"></span>Low risk</div>
           <div class="leg-row"><span class="tv-leg-line tv-leg-caution"></span>Caution</div>
           <div class="leg-row"><span class="tv-leg-line tv-leg-high"></span>High risk</div>
-          <div class="leg-row"><span class="tv-leg-line tv-leg-alt"></span>Safer alternative</div>
+          <div class="leg-row"><span class="tv-leg-line tv-leg-alt"></span>Other route options</div>
           <div class="leg-row"><span class="tv-leg-news"></span>Town with reports</div>
         </div>
       </div>

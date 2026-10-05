@@ -2,7 +2,11 @@
    TRAVEL SAFETY — intercity corridors, route-risk map, incident timing,
    and departure/route recommendations.
 
-   Each assessment combines four things:
+   Any two towns on the network can be chosen. The corridors below are its
+   edges; a trip is planned as a chain of them, and up to three genuinely
+   different chains are offered side by side.
+
+   Each route's assessment combines four things:
      • the corridor's baseline segment risk,
      • the hotspot index of the states it crosses,
      • the hour of departure,
@@ -14,9 +18,12 @@
    the times of day that recent reports mention; it is not per-hour data.
    ═══════════════════════════════════════════════════════════════════════ */
 let travelInitialized = false, travelMap = null, travelMapGroup = null, tvHourChart = null;
-let tvMode = 'Car', tvCurrentCorridor = null;
-// The news for the corridor on screen: null until asked, then loading / ready / error.
-let tvNews = { status: 'idle', key: '', data: null, error: '' };
+let tvMode = 'Car';
+// The options for the trip on screen, and the one being looked at. The
+// selected route keeps the name tvCurrentCorridor because app.js reads it.
+let tvRoutes = [], tvSelectedRoute = 0, tvCurrentCorridor = null;
+// News per route, keyed by the towns it passes: { status, data, error }.
+const tvNewsStore = new Map();
 let tvNewsFilter = 'all';
 let tvNewsTimer = null;
 
@@ -38,6 +45,11 @@ const TV_SEG_COLOR  = { low: '#35d08a', caution: '#f5a623', high: '#ff5a5f' };
 const TV_SEG_ORDER  = ['low', 'caution', 'high'];
 const TV_MODE_FACTOR = { Car: 1.0, Bus: 0.93, Convoy: 0.82 };
 const TV_NEWS_REFRESH_MS = 10 * 60 * 1000;
+const TV_MAX_ROUTES = 3;        // options offered for one trip
+const TV_MAX_LEGS = 12;         // longest chain of corridors considered
+const TV_DETOUR_LIMIT = 1.7;    // an alternative may take this many times the quickest
+const TV_JUNCTION_MIN = 10;     // minutes lost passing through a town between corridors
+const TV_FIRST_LIGHT = 6;       // earliest hour worth recommending a departure
 // How the score is put together, with and without live reports.
 const TV_SCORE_WEIGHTS = { segments: 0.45, states: 0.20, time: 0.15, live: 0.20 };
 const TV_SCORE_WEIGHTS_OFFLINE = { segments: 0.60, states: 0.25, time: 0.15, live: 0 };
@@ -61,8 +73,7 @@ const TV_CATEGORY = {
 const TV_CORRIDORS = [
   { from:'Kaduna', to:'Abuja (FCT)', road:'A2 corridor', distanceKm:188, estMin:160, checkpoints:7,
     waypoints:[[10.5105,7.4165,'low',null,'Kaduna'],[10.20,7.46,'low',null,'Kaduna'],[9.95,7.52,'caution','Rijana','Kaduna'],[9.78,7.56,'high','Katari','Kaduna'],[9.55,7.52,'high','Jere','Kaduna'],[9.30,7.45,'caution',null,'Niger'],[9.0765,7.3986,'low',null,'FCT (Abuja)']],
-    stretch:{name:'Rijana–Katari', kmFrom:42, kmTo:58, at:[9.66,7.55]},
-    alt:{name:'western bypass', addMin:35, cut:40, waypoints:[[10.5105,7.4165],[10.35,7.05],[9.95,6.85],[9.5,6.9],[9.2,7.15],[9.0765,7.3986]]} },
+    stretch:{name:'Rijana–Katari', kmFrom:42, kmTo:58, at:[9.66,7.55]} },
   { from:'Abuja (FCT)', to:'Lokoja', road:'A2 south', distanceKm:165, estMin:150, checkpoints:5,
     waypoints:[[9.0765,7.3986,'low',null,'FCT (Abuja)'],[8.70,7.10,'caution','Kwali','FCT (Abuja)'],[8.30,6.90,'caution','Abaji','FCT (Abuja)'],[7.95,6.80,'high','Koton-Karfe','Kogi'],[7.80,6.74,'caution',null,'Kogi']],
     stretch:{name:'Koton-Karfe belt', kmFrom:95, kmTo:120, at:[8.00,6.82]}, alt:null },
@@ -72,9 +83,11 @@ const TV_CORRIDORS = [
   { from:'Abuja (FCT)', to:'Jos', road:'Abuja–Jos road', distanceKm:270, estMin:255, checkpoints:8,
     waypoints:[[9.0765,7.3986,'low',null,'FCT (Abuja)'],[9.20,7.90,'caution','Keffi','Nasarawa'],[9.40,8.30,'caution','Akwanga','Nasarawa'],[9.55,8.60,'high','Riyom','Plateau'],[9.75,8.75,'caution','Barkin Ladi','Plateau'],[9.8965,8.8583,'low',null,'Plateau']],
     stretch:{name:'Riyom–Barkin Ladi', kmFrom:200, kmTo:235, at:[9.58,8.62]}, alt:null },
-  { from:'Kaduna', to:'Kano', road:'Kaduna–Zaria–Kano (A2)', distanceKm:253, estMin:210, checkpoints:9,
-    waypoints:[[10.5105,7.4165,'low',null,'Kaduna'],[10.80,7.55,'caution',null,'Kaduna'],[11.07,7.70,'caution','Zaria','Kaduna'],[11.50,7.90,'high','Makarfi','Kaduna'],[11.80,8.20,'caution',null,'Kano'],[12.00,8.52,'low',null,'Kano']],
-    stretch:{name:'Zaria–Makarfi fringe', kmFrom:95, kmTo:140, at:[11.48,7.92]}, alt:null },
+  { from:'Kaduna', to:'Zaria', road:'Kaduna–Zaria (A2)', distanceKm:80, estMin:65, checkpoints:3,
+    waypoints:[[10.5105,7.4165,'low',null,'Kaduna'],[10.80,7.55,'caution',null,'Kaduna'],[11.07,7.70,'caution',null,'Kaduna']] },
+  { from:'Zaria', to:'Kano', road:'Zaria–Kano (A2)', distanceKm:173, estMin:145, checkpoints:6,
+    waypoints:[[11.07,7.70,'caution',null,'Kaduna'],[11.50,7.90,'high','Makarfi','Kaduna'],[11.80,8.20,'caution',null,'Kano'],[12.00,8.52,'low',null,'Kano']],
+    stretch:{name:'Zaria–Makarfi fringe', kmFrom:15, kmTo:60, at:[11.48,7.92]} },
   { from:'Maiduguri', to:'Damaturu', road:'A3 Maiduguri–Damaturu', distanceKm:135, estMin:130, checkpoints:11,
     waypoints:[[11.8333,13.151,'high',null,'Borno'],[11.80,12.80,'high','Auno','Borno'],[11.78,12.40,'high','Benisheikh','Borno'],[11.76,12.10,'caution','Ngamdu','Borno'],[11.7466,11.9608,'caution',null,'Yobe']],
     stretch:{name:'Benisheikh corridor', kmFrom:45, kmTo:85, at:[11.79,12.50]}, alt:null },
@@ -113,7 +126,40 @@ const TV_CORRIDORS = [
   { from:'Bauchi', to:'Jos', road:'Bauchi–Jos road',
     waypoints:[[10.31,9.84,null,null,'Bauchi'],[10.06,9.07,null,'Toro','Bauchi'],[9.8965,8.8583,null,null,'Plateau']] },
   { from:'Yola', to:'Gombe', road:'Yola–Numan–Gombe road',
-    waypoints:[[9.2035,12.4954,null,null,'Adamawa'],[9.47,12.03,null,'Numan','Adamawa'],[9.81,11.31,null,'Kaltungo','Gombe'],[10.29,11.17,null,null,'Gombe']] }
+    waypoints:[[9.2035,12.4954,null,null,'Adamawa'],[9.47,12.03,null,'Numan','Adamawa'],[9.81,11.31,null,'Kaltungo','Gombe'],[10.29,11.17,null,null,'Gombe']] },
+
+  // Links that join the corridors above into one network and give most
+  // trips a second way round.
+  { from:'Lagos', to:'Abeokuta', road:'Lagos–Abeokuta expressway',
+    waypoints:[[6.5244,3.3792,null,null,'Lagos'],[6.70,3.24,null,'Sango-Ota','Ogun'],[7.1475,3.3619,null,null,'Ogun']] },
+  { from:'Abeokuta', to:'Ibadan', road:'Abeokuta–Ibadan road',
+    waypoints:[[7.1475,3.3619,null,null,'Ogun'],[7.28,3.62,null,null,'Ogun'],[7.3775,3.9470,null,null,'Oyo']] },
+  { from:'Ibadan', to:'Akure', road:'Ibadan–Ife–Akure road',
+    waypoints:[[7.3775,3.9470,null,null,'Oyo'],[7.48,4.56,null,'Ile-Ife','Osun'],[7.62,4.74,null,'Ilesa','Osun'],[7.25,5.19,null,null,'Ondo']] },
+  { from:'Akure', to:'Benin City', road:'Akure–Owo–Benin road',
+    waypoints:[[7.25,5.19,null,null,'Ondo'],[7.20,5.59,null,'Owo','Ondo'],[6.93,5.77,null,'Ifon','Ondo'],[6.335,5.6037,null,null,'Edo']] },
+  { from:'Ilorin', to:'Minna', road:'Ilorin–Jebba–Mokwa–Bida road',
+    waypoints:[[8.4966,4.5421,null,null,'Kwara'],[9.13,4.82,null,'Jebba','Kwara'],[9.29,5.05,null,'Mokwa','Niger'],[9.08,6.01,null,'Bida','Niger'],[9.6139,6.5569,null,null,'Niger']] },
+  { from:'Ilorin', to:'Lokoja', road:'Ilorin–Omu-Aran–Kabba road',
+    waypoints:[[8.4966,4.5421,null,null,'Kwara'],[8.14,5.10,null,'Omu-Aran','Kwara'],[7.83,6.07,null,'Kabba','Kogi'],[7.80,6.74,null,null,'Kogi']] },
+  { from:'Minna', to:'Kaduna', road:'Minna–Sarkin Pawa–Kaduna road',
+    waypoints:[[9.6139,6.5569,null,null,'Niger'],[10.02,7.11,null,'Sarkin Pawa','Niger'],[10.5105,7.4165,null,null,'Kaduna']] },
+  { from:'Kaduna', to:'Jos', road:'Kaduna–Kafanchan–Jos road',
+    waypoints:[[10.5105,7.4165,null,null,'Kaduna'],[9.87,7.95,null,'Kachia','Kaduna'],[9.58,8.29,null,'Kafanchan','Kaduna'],[9.8965,8.8583,null,null,'Plateau']] },
+  { from:'Makurdi', to:'Enugu', road:'Makurdi–Otukpo–Enugu road',
+    waypoints:[[7.7337,8.5214,null,null,'Benue'],[7.19,8.13,null,'Otukpo','Benue'],[6.92,7.51,null,'Obollo-Afor','Enugu'],[6.4584,7.5464,null,null,'Enugu']] },
+  { from:'Onitsha', to:'Port Harcourt', road:'Onitsha–Owerri–Port Harcourt road',
+    waypoints:[[6.1498,6.7857,null,null,'Anambra'],[5.85,6.86,null,'Ihiala','Anambra'],[5.4836,7.0333,null,'Owerri','Imo'],[5.10,6.81,null,'Elele','Rivers'],[4.8156,7.0498,null,null,'Rivers']] },
+  { from:'Yenagoa', to:'Benin City', road:'East–West road via Warri',
+    waypoints:[[4.9267,6.2676,null,null,'Bayelsa'],[5.23,6.19,null,'Patani','Delta'],[5.49,6.00,null,'Ughelli','Delta'],[5.52,5.75,null,'Warri','Delta'],[5.89,5.68,null,'Sapele','Delta'],[6.335,5.6037,null,null,'Edo']] },
+  { from:'Port Harcourt', to:'Uyo', road:'Port Harcourt–Ikot Abasi–Uyo road',
+    waypoints:[[4.8156,7.0498,null,null,'Rivers'],[4.72,7.35,null,'Bori','Rivers'],[4.57,7.56,null,'Ikot Abasi','Akwa Ibom'],[5.0377,7.9128,null,null,'Akwa Ibom']] },
+  { from:'Kano', to:'Damaturu', road:'Kano–Azare–Potiskum road',
+    waypoints:[[12.00,8.52,null,null,'Kano'],[11.81,8.84,null,'Wudil','Kano'],[11.68,10.19,null,'Azare','Bauchi'],[11.71,11.08,null,'Potiskum','Yobe'],[11.7466,11.9608,null,null,'Yobe']] },
+  { from:'Bauchi', to:'Kano', road:'Bauchi–Ningi–Kano road',
+    waypoints:[[10.31,9.84,null,null,'Bauchi'],[11.08,9.57,null,'Ningi','Bauchi'],[12.00,8.52,null,null,'Kano']] },
+  { from:'Bauchi', to:'Gombe', road:'Bauchi–Alkaleri–Gombe road',
+    waypoints:[[10.31,9.84,null,null,'Bauchi'],[10.27,10.33,null,'Alkaleri','Bauchi'],[10.29,11.17,null,null,'Gombe']] }
 ];
 
 function tv12h(h){ const ap = h >= 12 ? 'PM' : 'AM'; let hh = h % 12; if (hh === 0) hh = 12; return `${hh}:00 ${ap}`; }
@@ -183,39 +229,144 @@ function tvCorridorPlaces(corr){
   return corr.waypoints.slice(1, -1).map(w => w[3]).filter(Boolean);
 }
 
+// ── Road network ─────────────────────────────────────────────
+// The corridors are the edges of a road network and their end towns are its
+// junctions, so a trip between any two towns is a walk through that network —
+// and usually there is more than one.
+
+function tvTowns(){
+  return [...new Set(TV_CORRIDORS.flatMap(c => [c.from, c.to]))].sort();
+}
+
+function tvNeighbours(town){
+  return TV_CORRIDORS.flatMap(c => c.from === town ? [[c.to, c]] : c.to === town ? [[c.from, c]] : []);
+}
+
+// Every way of getting from A to B without passing through a town twice,
+// dropping anything much slower than the quickest.
+function tvEnumeratePaths(from, to){
+  TV_CORRIDORS.forEach(tvPrepareCorridor);
+
+  // Quickest time first (Dijkstra), so the search below knows when to give up.
+  const best = new Map([[from, 0]]);
+  const queue = [from];
+  while (queue.length){
+    queue.sort((a, b) => best.get(a) - best.get(b));
+    const town = queue.shift();
+    tvNeighbours(town).forEach(([next, c]) => {
+      const time = best.get(town) + c.estMin + TV_JUNCTION_MIN;
+      if (time < (best.get(next) ?? Infinity)){ best.set(next, time); queue.push(next); }
+    });
+  }
+  if (!best.has(to)) return [];
+  const limit = best.get(to) * TV_DETOUR_LIMIT + 30;
+
+  const paths = [];
+  const walk = (town, towns, time) => {
+    if (time > limit || towns.length > TV_MAX_LEGS + 1) return;
+    if (town === to){ paths.push({ towns: towns.slice(), time }); return; }
+    tvNeighbours(town).forEach(([next, c]) => {
+      if (towns.includes(next)) return;
+      towns.push(next);
+      walk(next, towns, time + c.estMin + TV_JUNCTION_MIN);
+      towns.pop();
+    });
+  };
+  walk(from, [from], 0);
+  return paths.sort((a, b) => a.time - b.time);
+}
+
+// Stitch a chain of towns into one route the rest of the code can treat
+// exactly like a single corridor.
+function tvBuildRoute(towns){
+  const legs = towns.slice(0, -1).map((town, i) => tvFindCorridor(town, towns[i + 1]));
+  const stateNames = new Set(stateData.map(s => s.state));
+  const waypoints = [];
+  const stretches = [];
+  let km = 0;
+  legs.forEach((leg, i) => {
+    const points = leg.waypoints.map(w => w.slice());
+    if (i > 0) points.shift();                    // the junction is already there
+    waypoints.push(...points);
+    if (leg.stretch) stretches.push({ ...leg.stretch, kmFrom: km + leg.stretch.kmFrom, kmTo: km + leg.stretch.kmTo });
+    km += leg.distanceKm;
+    // A junction town is somewhere reports can name — unless its name is also
+    // a state's, which would claim every story in that state for this road.
+    if (i < legs.length - 1 && !stateNames.has(leg.to) && !leg.to.includes('(')){
+      waypoints[waypoints.length - 1][3] = leg.to;
+    }
+  });
+  const via = towns.slice(1, -1);
+  return {
+    key: towns.join('>'), from: towns[0], to: towns[towns.length - 1], towns, via, legs,
+    legKeys: legs.map(leg => [leg.from, leg.to].sort().join('|')),
+    road: legs.length === 1 ? legs[0].road : `via ${via.join(' · ')}`,
+    waypoints, stretches,
+    states: [...new Set(waypoints.map(w => w[4]).filter(Boolean))],
+    distanceKm: km,
+    estMin: legs.reduce((sum, leg) => sum + leg.estMin, 0) + TV_JUNCTION_MIN * (legs.length - 1),
+    checkpoints: legs.reduce((sum, leg) => sum + leg.checkpoints, 0),
+    estimated: legs.some(leg => leg.estimated),
+    derivedRisk: legs.some(leg => leg.derivedRisk)
+  };
+}
+
+// Up to three routes worth offering: the quickest, then whichever others are
+// genuinely different roads rather than the same trip with one town swapped.
+function tvPlanRoutes(from, to){
+  const routes = [];
+  for (const path of tvEnumeratePaths(from, to)){
+    const route = tvBuildRoute(path.towns);
+    const tooSimilar = routes.some(chosen => {
+      const shared = route.legKeys.filter(key => chosen.legKeys.includes(key)).length;
+      return shared / Math.min(route.legKeys.length, chosen.legKeys.length) > 0.6;
+    });
+    if (tooSimilar) continue;
+    routes.push(route);
+    if (routes.length === TV_MAX_ROUTES) break;
+  }
+  return routes;
+}
+
 // ── Live reports ─────────────────────────────────────────────
 
-function tvNewsKey(corr){ return [corr.from, corr.to].sort().join('|'); }
-// During a refresh the previous answer stays in use, so the score does not flicker.
-function tvLiveData(){ return tvNews.status === 'ready' || tvNews.status === 'loading' ? tvNews.data : null; }
+function tvNewsEntry(route){
+  return (route && tvNewsStore.get(route.key)) || { status: 'idle', data: null, error: '' };
+}
 
-async function tvLoadNews(corr, force){
-  const key = tvNewsKey(corr);
-  if (!force && tvNews.key === key && (tvNews.status === 'ready' || tvNews.status === 'loading')) return;
-  tvNews = { status: 'loading', key, data: tvNews.key === key ? tvNews.data : null, error: '' };
-  renderTravelNews();
+// During a refresh the previous answer stays in use, so scores do not flicker.
+function tvLiveData(route = tvCurrentCorridor){
+  return tvNewsEntry(route).data;
+}
+
+async function tvLoadNews(route, force){
+  const entry = tvNewsEntry(route);
+  if (!force && (entry.status === 'ready' || entry.status === 'loading')) return;
+  tvNewsStore.set(route.key, { status: 'loading', data: entry.data, error: '' });
+  tvRenderAssessment();
 
   const params = new URLSearchParams({
-    states: corr.states.join('|'),
-    places: tvCorridorPlaces(corr).join('|'),
-    label: `${corr.from} → ${corr.to}`
+    states: route.states.join('|'),
+    places: tvCorridorPlaces(route).join('|'),
+    hubs: route.via.join('|'),
+    // Only a single road has a name the papers would use ("Kaduna-Abuja road").
+    label: route.legs.length === 1 ? `${route.from} → ${route.to}` : ''
   });
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45000);
+  const timeout = setTimeout(() => controller.abort(), 60000);
   try {
     const response = await fetch(`/api/route-news?${params}`, { cache: 'no-store', signal: controller.signal });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `Server returned ${response.status}`);
-    if (tvNews.key !== key) return;               // the traveller has moved on to another route
-    tvNews = { status: 'ready', key, data, error: '' };
+    tvNewsStore.set(route.key, { status: 'ready', data, error: '' });
   } catch (error) {
-    if (tvNews.key !== key) return;
-    tvNews = { status: 'error', key, data: null,
-      error: error.name === 'AbortError' ? 'The news sources took too long to answer.' : error.message };
+    tvNewsStore.set(route.key, { status: 'error', data: null,
+      error: error.name === 'AbortError' ? 'The news sources took too long to answer.' : error.message });
   } finally {
     clearTimeout(timeout);
   }
-  if (tvCurrentCorridor && tvNewsKey(tvCurrentCorridor) === key) tvRenderAssessment();
+  // Compare by key: the same trip may have been planned again in the meantime.
+  if (tvRoutes.some(shown => shown.key === route.key)) tvRenderAssessment();
 }
 
 // Segment levels after the news has had its say: a report naming a town on
@@ -223,7 +374,7 @@ async function tvLoadNews(corr, force){
 function tvEffectiveLevels(corr){
   const levels = corr.waypoints.map(w => w[2]);
   const raised = new Set();
-  const live = tvLiveData();
+  const live = tvLiveData(corr);
   if (live){
     live.events.filter(e => e.onRoute && (e.ageHours ?? 999) <= 96 && e.category !== 'road_condition').forEach(e => {
       e.places.forEach(place => {
@@ -237,9 +388,9 @@ function tvEffectiveLevels(corr){
   return { levels, raised };
 }
 
-function tvHourlyCurve(){
+function tvHourlyCurve(corr){
   const curve = TV_HOURLY.slice();
-  const mentions = tvLiveData()?.counts.timeOfDay || {};
+  const mentions = tvLiveData(corr)?.counts.timeOfDay || {};
   let used = 0;
   Object.entries(mentions).forEach(([part, count]) => {
     used += count;
@@ -255,12 +406,16 @@ function tvRouteRisk(corr, departHour){
     weights.push(Math.max(TV_SEG_WEIGHT[levels[i]], TV_SEG_WEIGHT[levels[i+1]]));
   }
   const mean = weights.reduce((a,b)=>a+b,0) / weights.length;
-  const { curve } = tvHourlyCurve();
-  const live = tvLiveData();
+  const { curve } = tvHourlyCurve(corr);
+  const live = tvLiveData(corr);
+  // A long trip is still on the road hours after it set off, so it is judged
+  // on the worst hour it passes through, not only the one it leaves in.
+  let worstHour = 0;
+  for (let h = 0; h <= Math.ceil(corr.estMin / 60); h++) worstHour = Math.max(worstHour, curve[(departHour + h) % 24]);
   const parts = {
     segments: (mean + Math.max(...weights)) / 2,
     states: corr.states.reduce((sum, s) => sum + tvStateScore(s), 0) / corr.states.length,
-    time: curve[departHour] / Math.max(...curve) * 100,
+    time: worstHour / Math.max(...curve) * 100,
     live: live ? live.liveIndex : 0
   };
   const w = live ? TV_SCORE_WEIGHTS : TV_SCORE_WEIGHTS_OFFLINE;
@@ -290,6 +445,8 @@ function tvWindow(curve, predicate){
   return `${tvShortH(best[0])}–${tvShortH((best[best.length-1] + 1) % 24)}`;
 }
 
+function tvDuration(minutes){ return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`; }
+
 function selectTravelMode(btn){
   tvMode = btn.dataset.mode;
   document.querySelectorAll('#tvModes .tv-mode').forEach(b => b.classList.toggle('active', b === btn));
@@ -302,37 +459,102 @@ function tvPinIcon(color){
 }
 
 function fitTravelBounds(){
-  if (!tvCurrentCorridor || !travelMap) return;
-  const pts = tvCurrentCorridor.waypoints.map(w => [w[0], w[1]]);
-  if (tvCurrentCorridor.alt) tvCurrentCorridor.alt.waypoints.forEach(w => pts.push([w[0], w[1]]));
-  travelMap.fitBounds(L.latLngBounds(pts).pad(0.25));
+  if (!tvRoutes.length || !travelMap) return;
+  const pts = tvRoutes.flatMap(route => route.waypoints.map(w => [w[0], w[1]]));
+  travelMap.invalidateSize();
+  travelMap.fitBounds(L.latLngBounds(pts).pad(0.12), { animate: false });
+}
+
+// ── Route options ────────────────────────────────────────────
+
+// What each option is best at, worked out from the scores as they stand.
+function tvRouteLabels(scores){
+  const quickest = tvRoutes.reduce((best, route, i) => route.estMin < tvRoutes[best].estMin ? i : best, 0);
+  const safest = scores.reduce((best, score, i) => score < scores[best] ? i : best, 0);
+  return tvRoutes.map((route, i) => {
+    if (tvRoutes.length === 1) return 'Only route';
+    if (i === quickest && i === safest) return 'Fastest · lowest risk';
+    if (i === quickest) return 'Fastest';
+    if (i === safest) return 'Lowest risk';
+    return 'Alternative';
+  });
+}
+
+function selectTravelRoute(index){
+  if (!tvRoutes[index]) return;
+  tvSelectedRoute = index;
+  tvCurrentCorridor = tvRoutes[index];
+  tvRenderAssessment(true);
+}
+
+function renderTravelOptions(risks, labels){
+  const box = document.getElementById('tvRouteOptions');
+  document.getElementById('tvOptionsLabel').textContent = tvRoutes.length > 1
+    ? `${tvRoutes.length} routes · tap one for its details` : 'Route';
+  const quickest = Math.min(...tvRoutes.map(route => route.estMin));
+  box.innerHTML = tvRoutes.map((route, i) => {
+    const risk = risks[i];
+    const band = tvRiskBand(risk.score);
+    const entry = tvNewsEntry(route);
+    const live = entry.data;
+    const extra = route.estMin - quickest;
+    const news = entry.status === 'loading' && !live ? '<i class="ti ti-loader-2 tv-spin"></i> checking news'
+      : entry.status === 'error' ? 'news unavailable'
+      : live ? `${tvPlural(live.counts.events, 'report')}${live.counts.onRoute ? ` · <b>${live.counts.onRoute} on the road</b>` : ''}`
+      : '';
+    return `<button type="button" class="tv-option ${band.cls}${i === tvSelectedRoute ? ' active' : ''}" onclick="selectTravelRoute(${i})">
+      <span class="tv-option-top">
+        <span class="tv-option-tag">${labels[i]}</span>
+        <span class="tv-option-score">${risk.score}<em>/100</em></span>
+      </span>
+      <span class="tv-option-road">${escapeHtml(route.legs.length === 1 ? route.road : `via ${route.via.join(' · ')}`)}</span>
+      <span class="tv-option-facts">
+        <span><i class="ti ti-road"></i> ${route.estimated ? '≈ ' : ''}${route.distanceKm} km</span>
+        <span><i class="ti ti-clock"></i> ${tvDuration(route.estMin)}${extra > 0 ? ` <em>+${extra >= 60 ? tvDuration(extra) : `${extra} min`}</em>` : ''}</span>
+        <span><i class="ti ti-map-2"></i> ${tvPlural(route.states.length, 'state')}</span>
+      </span>
+      <span class="tv-option-facts">
+        <span class="${risk.highSegs ? 'is-bad' : ''}"><i class="ti ti-alert-triangle"></i> ${risk.highSegs} high-risk of ${tvPlural(risk.segCount, 'segment')}</span>
+        <span>${band.label}</span>
+      </span>
+      ${news ? `<span class="tv-option-news">${news}</span>` : ''}
+    </button>`;
+  }).join('');
 }
 
 function renderTravelRoute(corr, refit){
   travelMapGroup.clearLayers();
+
+  // The options not chosen, drawn underneath and clickable.
+  tvRoutes.forEach((route, i) => {
+    if (route === corr) return;
+    L.polyline(route.waypoints.map(w => [w[0], w[1]]), { color:'#2e8fff', weight:4, opacity:0.75, dashArray:'6 8' })
+      .bindTooltip(`${route.legs.length === 1 ? route.road : `via ${route.via.join(' · ')}`} — tap to compare`, { sticky:true })
+      .on('click', () => selectTravelRoute(i))
+      .addTo(travelMapGroup);
+  });
+
   const { levels, raised } = tvEffectiveLevels(corr);
   for (let i = 0; i < corr.waypoints.length - 1; i++){
     const a = corr.waypoints[i], b = corr.waypoints[i+1];
     const risk = TV_SEG_WEIGHT[levels[i]] >= TV_SEG_WEIGHT[levels[i+1]] ? levels[i] : levels[i+1];
     L.polyline([[a[0],a[1]],[b[0],b[1]]], { color: TV_SEG_COLOR[risk], weight: 6, opacity: 0.95, lineCap:'round' }).addTo(travelMapGroup);
   }
-  if (corr.alt){
-    L.polyline(corr.alt.waypoints.map(w => [w[0],w[1]]), { color:'#2e8fff', weight:3, opacity:0.8, dashArray:'7 7' }).addTo(travelMapGroup);
-  }
-  if (corr.stretch){
-    L.marker([corr.stretch.at[0], corr.stretch.at[1]], {
-      icon: L.divIcon({ className:'', iconSize:[0,0], html:`<div class="tv-stretch-flag"><i class="ti ti-alert-triangle-filled"></i> ${escapeHtml(corr.stretch.name)} · ambush-prone</div>` })
+  corr.stretches.forEach(stretch => {
+    L.marker([stretch.at[0], stretch.at[1]], {
+      icon: L.divIcon({ className:'', iconSize:[0,0], html:`<div class="tv-stretch-flag"><i class="ti ti-alert-triangle-filled"></i> ${escapeHtml(stretch.name)} · ambush-prone</div>` })
     }).addTo(travelMapGroup);
-  }
+  });
 
   // Towns along the road, and what has been reported at each.
-  const live = tvLiveData();
+  const live = tvLiveData(corr);
   corr.waypoints.slice(1, -1).forEach((w, offset) => {
     if (!w[3]) return;
     const events = live ? live.events.filter(e => e.places.includes(w[3])) : [];
+    const junction = corr.via.includes(w[3]);
     const marker = L.marker([w[0], w[1]], {
       icon: L.divIcon({ className:'', iconSize:[0,0],
-        html:`<div class="tv-town${events.length ? ' has-news' : ''}${raised.has(offset + 1) ? ' is-raised' : ''}"><span class="tv-town-dot"></span>${escapeHtml(w[3])}${events.length ? ` <b>${events.length}</b>` : ''}</div>` })
+        html:`<div class="tv-town${events.length ? ' has-news' : ''}${junction ? ' is-junction' : ''}${raised.has(offset + 1) ? ' is-raised' : ''}"><span class="tv-town-dot"></span>${escapeHtml(w[3])}${events.length ? ` <b>${events.length}</b>` : ''}</div>` })
     }).addTo(travelMapGroup);
     if (events.length){
       marker.bindPopup(`<div class="popup-title">${escapeHtml(w[3])} · ${tvPlural(events.length, 'report')}</div>` +
@@ -346,25 +568,30 @@ function renderTravelRoute(corr, refit){
   if (refit) fitTravelBounds();
 }
 
-function renderTravelRating(corr, risk){
+function renderTravelRating(corr, risk, label){
   const band = tvRiskBand(risk.score);
-  const live = tvLiveData();
-  const stamp = tvNews.status === 'loading' ? 'checking news…'
+  const entry = tvNewsEntry(corr);
+  const live = entry.data;
+  const stamp = entry.status === 'loading' ? 'checking news…'
     : live ? `news checked ${formatNewsDate(live.generatedAt)}`
     : 'baseline only';
   const rows = [
     ['segments', 'Road segments'], ['states', 'State hotspot index'],
-    ['time', 'Hour of departure'], ['live', 'Live reports']
-  ].map(([key, label]) => {
+    ['time', 'Hours on the road'], ['live', 'Live reports']
+  ].map(([key, name]) => {
     const value = Math.round(risk.parts[key]);
     const off = key === 'live' && !risk.hasLive;
     return `<div class="tv-part${off ? ' is-off' : ''}">
-      <span class="tv-part-lbl">${label}<em>${Math.round(risk.weights[key] * 100)}%</em></span>
+      <span class="tv-part-lbl">${name}<em>${Math.round(risk.weights[key] * 100)}%</em></span>
       <span class="tv-part-track"><span class="tv-part-fill" style="width:${off ? 0 : value}%;background:${tvHourColor(value)}"></span></span>
       <span class="tv-part-val">${off ? '—' : value}</span>
     </div>`;
   }).join('');
   const approx = corr.estimated ? '≈ ' : '';
+  const legRows = corr.legs.length > 1
+    ? `<div class="tv-legs"><div class="tv-parts-hd">Leg by leg</div>${corr.legs.map(leg =>
+        `<div class="tv-leg"><span>${escapeHtml(leg.from)} → ${escapeHtml(leg.to)}</span><span>${leg.distanceKm} km · ${tvDuration(leg.estMin)}</span></div>`).join('')}</div>`
+    : '';
 
   const card = document.getElementById('tvRatingCard');
   card.className = `panel-card tv-rating-card ${band.cls}`;
@@ -374,21 +601,24 @@ function renderTravelRating(corr, risk){
       <span class="tv-rating-live">${escapeHtml(stamp)}</span>
     </div>
     <div class="tv-score">${risk.score}<span class="tv-score-max"> /100</span></div>
-    <div class="tv-corridor"><i class="ti ti-route"></i> ${escapeHtml(corr.from)} → ${escapeHtml(corr.to)} · ${escapeHtml(corr.road)}</div>
+    <div class="tv-corridor"><i class="ti ti-route"></i> ${escapeHtml(corr.from)} → ${escapeHtml(corr.to)} · ${escapeHtml(corr.road)}${label ? ` · ${escapeHtml(label)}` : ''}</div>
     <div class="tv-metrics">
       <div class="tv-metric"><div class="tv-metric-lbl">Distance</div><div class="tv-metric-val">${approx}${corr.distanceKm} km</div></div>
-      <div class="tv-metric"><div class="tv-metric-lbl">Est. time</div><div class="tv-metric-val">${approx}${Math.floor(corr.estMin/60)}h ${corr.estMin%60}m</div></div>
+      <div class="tv-metric"><div class="tv-metric-lbl">Est. time</div><div class="tv-metric-val">${approx}${tvDuration(corr.estMin)}</div></div>
       <div class="tv-metric"><div class="tv-metric-lbl">Risk segments</div><div class="tv-metric-val ${risk.highSegs ? 'danger' : ''}">${risk.highSegs} of ${risk.segCount}</div></div>
-      <div class="tv-metric"><div class="tv-metric-lbl">Reports · 7 days</div><div class="tv-metric-val ${live && live.counts.onRoute ? 'danger' : ''}">${live ? live.counts.events : '—'}</div></div>
+      <div class="tv-metric"><div class="tv-metric-lbl">Checkpoints</div><div class="tv-metric-val">${corr.checkpoints}</div></div>
+      <div class="tv-metric"><div class="tv-metric-lbl">Reports · 7 days</div><div class="tv-metric-val">${live ? live.counts.events : '—'}</div></div>
+      <div class="tv-metric"><div class="tv-metric-lbl">On this road</div><div class="tv-metric-val ${live && live.counts.onRoute ? 'danger' : ''}">${live ? live.counts.onRoute : '—'}</div></div>
     </div>
     <div class="tv-parts"><div class="tv-parts-hd">What the score is made of</div>${rows}</div>
-    <div class="tv-states">Crosses ${corr.states.map(escapeHtml).join(' · ')}${corr.derivedRisk ? ' · segment risk taken from each state’s hotspot index' : ''}</div>`;
+    ${legRows}
+    <div class="tv-states">Crosses ${corr.states.map(escapeHtml).join(' · ')}${corr.derivedRisk ? ' · some segment risk is taken from the state’s hotspot index' : ''}</div>`;
 }
 
-function renderTravelHourChart(){
+function renderTravelHourChart(corr){
   const canvas = document.getElementById('tvHourChart');
-  if (!canvas) return;
-  const { curve, mentions } = tvHourlyCurve();
+  const { curve, mentions } = tvHourlyCurve(corr);
+  if (!canvas) return curve;
   const labels = Array.from({length:24}, (_,h) => [0,6,12,18,23].includes(h) ? (h===23?'11p':tvShortH(h)) : '');
   if (tvHourChart) {
     tvHourChart.data.datasets[0].data = curve;
@@ -415,20 +645,24 @@ function renderTravelDepart(corr, risk, curve){
   let peakStart = -1;
   for (let h = 12; h < 24; h++) if (curve[h] >= 56) { peakStart = h; break; }
   if (peakStart < 0) peakStart = 17;
-  const live = tvLiveData();
+  const live = tvLiveData(corr);
   const travelH = corr.estMin / 60;
   // A busy week on this road earns an extra hour's margin before dusk.
   const margin = live && live.liveIndex >= 50 ? 2 : 1;
-  let leaveBy = Math.floor(peakStart - travelH - margin);
-  leaveBy = Math.max(5, Math.min(leaveBy, 20));
+  const leaveBy = Math.floor(peakStart - travelH - margin);
   const postpone = risk.score >= 80 && live && live.events.some(e => e.onRoute && (e.ageHours ?? 999) <= 48);
+  // Too far to drive between first light and dusk: say so rather than
+  // recommend a departure in the small hours.
+  const tooLong = leaveBy < TV_FIRST_LIGHT;
 
   const box = document.getElementById('tvDepart');
-  box.classList.toggle('is-warn', Boolean(postpone));
-  box.querySelector('.tv-depart-ico i').className = postpone ? 'ti ti-hand-stop' : 'ti ti-circle-check';
-  document.getElementById('tvDepartLbl').textContent = postpone ? 'Recommendation' : 'Recommended departure';
-  document.getElementById('tvDepartVal').textContent = postpone ? 'Postpone if you can' : `Leave before ${tv12h(leaveBy)}`;
-  return { peakStart, leaveBy, postpone, margin };
+  box.classList.toggle('is-warn', Boolean(postpone || tooLong));
+  box.querySelector('.tv-depart-ico i').className = postpone ? 'ti ti-hand-stop' : tooLong ? 'ti ti-bed' : 'ti ti-circle-check';
+  document.getElementById('tvDepartLbl').textContent = postpone || tooLong ? 'Recommendation' : 'Recommended departure';
+  document.getElementById('tvDepartVal').textContent = postpone ? 'Postpone if you can'
+    : tooLong ? 'Break the journey overnight'
+    : `Leave before ${tv12h(leaveBy)}`;
+  return { peakStart, leaveBy, postpone, tooLong, margin };
 }
 
 function tvSourceLine(e){
@@ -436,12 +670,28 @@ function tvSourceLine(e){
   return `${escapeHtml(e.source)}${extra}, ${tvAgo(e.ageHours)}`;
 }
 
-function renderTravelRecs(corr, departHour, dep){
+function renderTravelRecs(corr, departHour, dep, risks, labels){
   const recs = [];
-  const live = tvLiveData();
+  const live = tvLiveData(corr);
+  const mine = tvRoutes.indexOf(corr);
 
   if (dep.postpone){
     recs.push({ c:'r-red', i:'ti-hand-stop', html:`<strong>Postpone non-essential travel on this road.</strong> The route scores in the highest band and incidents have been reported on it in the last two days.` });
+  }
+  // How this option stands against the others.
+  if (tvRoutes.length > 1){
+    const safest = risks.reduce((best, r, i) => r.score < risks[best].score ? i : best, 0);
+    if (safest !== mine && risks[mine].score - risks[safest].score >= 4){
+      const other = tvRoutes[safest];
+      const delta = other.estMin - corr.estMin;
+      recs.push({ c:'r-blue', i:'ti-arrows-shuffle', html:`<strong>The route ${escapeHtml(other.road)} scores ${risks[mine].score - risks[safest].score} points lower</strong> (${risks[safest].score} against ${risks[mine].score})${delta > 0 ? ` for about ${delta} minutes more driving` : delta < 0 ? ` and is about ${-delta} minutes quicker` : ''}. <button type="button" class="tv-inline-btn" onclick="selectTravelRoute(${safest})">Show it</button>` });
+    } else if (safest === mine){
+      recs.push({ c:'r-green', i:'ti-circle-check', html:`<strong>This is the lowest-risk of the ${tvRoutes.length} routes</strong> between ${escapeHtml(corr.from)} and ${escapeHtml(corr.to)}.` });
+    }
+  }
+  if (dep.tooLong){
+    const stop = corr.via[Math.floor(corr.via.length / 2)];
+    recs.push({ c:'r-orange', i:'ti-bed', html:`<strong>At ${tvDuration(corr.estMin)} this is too long to finish in daylight.</strong> Leave at first light and stop overnight${stop ? ` in ${escapeHtml(stop)}` : ' at a major town'} rather than drive into the evening.` });
   }
   if (live){
     // What has happened on the road itself comes before anything general.
@@ -450,9 +700,9 @@ function renderTravelRecs(corr, departHour, dep){
         html:`<strong>Reported at ${escapeHtml(e.places.join(', '))}:</strong> <a href="${escapeHtml(e.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(e.title)}</a> <span class="tv-rec-src">— ${tvSourceLine(e)}</span>` });
     });
   }
-  if (corr.stretch){
-    recs.push({ c:'r-red', i:'ti-alert-triangle-filled', html:`<strong>Avoid the ${escapeHtml(corr.stretch.name)} stretch (km ${corr.stretch.kmFrom}–${corr.stretch.kmTo})</strong> — highest ambush risk on this corridor, especially after dark.` });
-  }
+  corr.stretches.slice(0, 2).forEach(stretch => {
+    recs.push({ c:'r-red', i:'ti-alert-triangle-filled', html:`<strong>Avoid the ${escapeHtml(stretch.name)} stretch (km ${stretch.kmFrom}–${stretch.kmTo})</strong> — highest ambush risk on this route, especially after dark.` });
+  });
   if (live){
     // The kind of incident being reported most, weighted by how recent and how close.
     const byCategory = new Map();
@@ -477,17 +727,16 @@ function renderTravelRecs(corr, departHour, dep){
     }
   }
 
-  const entersPeak = departHour >= dep.peakStart || (departHour + corr.estMin/60) >= dep.peakStart;
-  recs.push({ c:'r-green', i:'ti-sun-high', html: entersPeak
-    ? `<strong>Travel in daylight.</strong> Your ${tv12h(departHour)} departure enters the peak-risk window — move it earlier to arrive before dusk.`
-    : `<strong>Travel in daylight.</strong> Your ${tv12h(departHour)} departure keeps you clear of the dusk peak — keep it that way.` });
-  if (corr.alt){
-    recs.push({ c:'r-blue', i:'ti-route', html:`<strong>Consider the ${escapeHtml(corr.alt.name)}.</strong> Adds ~${corr.alt.addMin} min but cuts exposure to the high-risk stretch by about ${corr.alt.cut}%.` });
+  if (!dep.tooLong){
+    const entersPeak = departHour >= dep.peakStart || (departHour + corr.estMin/60) >= dep.peakStart;
+    recs.push({ c:'r-green', i:'ti-sun-high', html: entersPeak
+      ? `<strong>Travel in daylight.</strong> Your ${tv12h(departHour)} departure enters the peak-risk window — move it earlier to arrive before dusk.`
+      : `<strong>Travel in daylight.</strong> Your ${tv12h(departHour)} departure keeps you clear of the dusk peak — keep it that way.` });
   }
   recs.push({ c:'r-orange', i:'ti-shield', html: tvMode === 'Convoy'
     ? `<strong>Good — you're moving in convoy.</strong> Keep doors locked and fuel topped up; don't stop in the flagged zone.`
     : `<strong>Move in a group or convoy.</strong> Keep doors locked and fuel topped up; avoid stopping in the flagged zone.` });
-  recs.push({ c:'r-blue', i:'ti-share', html:`<strong>Share your live trip</strong> with a trusted contact and check in at each major town.` });
+  recs.push({ c:'r-blue', i:'ti-share', html:`<strong>Share your live trip</strong> with a trusted contact and check in at ${corr.via.length ? escapeHtml(corr.via.join(', ')) : 'each major town'}.` });
 
   document.getElementById('tvRecs').innerHTML = recs.map(r =>
     `<div class="tv-rec ${r.c}"><i class="ti ${r.i} tv-rec-ico"></i><div class="tv-rec-txt">${r.html}</div></div>`).join('');
@@ -501,7 +750,7 @@ function setTravelNewsFilter(btn){
 }
 
 function refreshTravelNews(){
-  if (tvCurrentCorridor) tvLoadNews(tvCurrentCorridor, true);
+  tvRoutes.forEach(route => tvLoadNews(route, true));
 }
 
 function tvNewsItemHtml(e){
@@ -528,31 +777,32 @@ function renderTravelNews(){
   const summary = document.getElementById('tvNewsSummary');
   const sourcesEl = document.getElementById('tvNewsSources');
   if (!list) return;
+  const entry = tvNewsEntry(tvCurrentCorridor);
   document.querySelectorAll('#tvNewsFilters .tv-news-filter').forEach(b => b.classList.toggle('active', b.dataset.filter === tvNewsFilter));
-  document.getElementById('tvNewsRefresh').classList.toggle('is-busy', tvNews.status === 'loading');
+  document.getElementById('tvNewsRefresh').classList.toggle('is-busy', entry.status === 'loading');
 
-  if (tvNews.status === 'idle' || !tvCurrentCorridor){
+  if (!tvCurrentCorridor || (entry.status === 'idle' && !entry.data)){
     summary.textContent = '';
     sourcesEl.innerHTML = '';
     list.innerHTML = '<div class="tv-empty">Assess a route to see what is being reported along it.</div>';
     return;
   }
-  if (tvNews.status === 'loading' && !tvNews.data){
+  if (entry.status === 'loading' && !entry.data){
     summary.textContent = 'Checking regional and national sources…';
     sourcesEl.innerHTML = '';
-    list.innerHTML = '<div class="tv-news-wait"><i class="ti ti-loader-2 ti-spin"></i> Reading the papers for the states on this route. The first check takes a few seconds.</div>';
+    list.innerHTML = '<div class="tv-news-wait"><i class="ti ti-loader-2"></i> Reading the papers for the states on this route. The first check takes a few seconds.</div>';
     return;
   }
-  if (tvNews.status === 'error'){
+  if (entry.status === 'error'){
     summary.textContent = 'News unavailable';
     sourcesEl.innerHTML = '';
-    list.innerHTML = `<div class="tv-empty"><strong>Could not load route news.</strong> ${escapeHtml(tvNews.error)} The rating on the left is the baseline without live reports. <button type="button" class="tv-inline-btn" onclick="refreshTravelNews()">Try again</button></div>`;
+    list.innerHTML = `<div class="tv-empty"><strong>Could not load route news.</strong> ${escapeHtml(entry.error)} The rating is the baseline without live reports. <button type="button" class="tv-inline-btn" onclick="refreshTravelNews()">Try again</button></div>`;
     return;
   }
 
-  const live = tvNews.data;
+  const live = entry.data;
   const c = live.counts;
-  summary.innerHTML = `${tvPlural(c.events, 'incident')} from ${tvPlural(c.reports, 'report')} · ${c.onRoute} on this road · ${c.roadRelated} road-related · ${c.last24h} in the last 24h`;
+  summary.innerHTML = `<strong>${escapeHtml(tvCurrentCorridor.road)}</strong> · ${tvPlural(c.events, 'incident')} from ${tvPlural(c.reports, 'report')} · ${c.onRoute} on this road · ${c.roadRelated} road-related · ${c.last24h} in the last 24h`;
 
   const filters = {
     all: () => true,
@@ -568,7 +818,8 @@ function renderTravelNews(){
   const s = live.sources;
   const regional = s.list.filter(row => row.scope === 'regional');
   const row = r => `<li class="${r.ok ? '' : 'is-down'}"><span>${escapeHtml(r.name)}</span><span>${r.ok ? `${r.matched} of ${r.items} relevant${r.stale ? ' · cached' : ''}` : 'no answer'}</span></li>`;
-  sourcesEl.innerHTML = `<details>
+  const wasOpen = sourcesEl.querySelector('details')?.open;
+  sourcesEl.innerHTML = `<details${wasOpen ? ' open' : ''}>
     <summary><i class="ti ti-rss"></i> ${s.answered} of ${tvPlural(s.checked, 'source')} answered · ${s.regionalAnswered} regional${s.failed.length ? ` · ${s.failed.length} unreachable` : ''}${s.offline.length ? ` · ${s.offline.length} not online` : ''}</summary>
     <div class="tv-src-grid">
       <div><div class="tv-src-hd">Regional outlets for ${escapeHtml(live.route.zones.join(', '))}</div><ul>${regional.map(row).join('') || '<li><span>None with a feed for these states</span><span></span></li>'}</ul></div>
@@ -587,31 +838,38 @@ function tvDepartHour(){
   return Number.isNaN(hour) ? 16 : hour;
 }
 
-// Draw everything for the corridor on screen from what is known right now.
+// Draw everything for the routes on screen from what is known right now.
 function tvRenderAssessment(refit){
   const corr = tvCurrentCorridor;
   if (!corr) return;
   const departHour = tvDepartHour();
-  const risk = tvRouteRisk(corr, departHour);
-  const live = tvLiveData();
+  const risks = tvRoutes.map(route => tvRouteRisk(route, departHour));
+  const labels = tvRouteLabels(risks.map(r => r.score));
+  const mine = tvRoutes.indexOf(corr);
+  const risk = risks[mine];
+  const live = tvLiveData(corr);
+
   const notes = [];
-  if (corr.stretch) notes.push('1 high-risk stretch');
+  if (corr.stretches.length) notes.push(tvPlural(corr.stretches.length, 'high-risk stretch').replace('stretchs', 'stretches'));
   if (live && live.counts.onRoute) notes.push(`${tvPlural(live.counts.onRoute, 'report')} on this road`);
   document.getElementById('tvStretchNote').innerHTML = notes.length ? `<i class="ti ti-alert-triangle"></i> ${notes.join(' · ')}` : '';
 
+  renderTravelOptions(risks, labels);
   renderTravelRoute(corr, refit);
-  renderTravelRating(corr, risk);
-  const curve = renderTravelHourChart();
+  renderTravelRating(corr, risk, tvRoutes.length > 1 ? labels[mine] : '');
+  const curve = renderTravelHourChart(corr);
   const dep = renderTravelDepart(corr, risk, curve);
-  renderTravelRecs(corr, departHour, dep);
+  renderTravelRecs(corr, departHour, dep, risks, labels);
   renderTravelNews();
 }
 
 function tvShowMessage(html){
   tvCurrentCorridor = null;
-  tvNews = { status: 'idle', key: '', data: null, error: '' };
+  tvRoutes = [];
   if (travelMapGroup) travelMapGroup.clearLayers();
   document.getElementById('tvStretchNote').textContent = '';
+  document.getElementById('tvOptionsLabel').textContent = 'Route';
+  document.getElementById('tvRouteOptions').innerHTML = '';
   const card = document.getElementById('tvRatingCard');
   card.className = 'panel-card tv-rating-card';
   card.innerHTML = `<div class="tv-empty">${html}</div>`;
@@ -629,37 +887,45 @@ function assessRoute(){
     tvShowMessage('Origin and destination are the same — pick two different towns.');
     return;
   }
-  const corr = tvFindCorridor(from, to);
-  if (!corr){
+  const routes = tvPlanRoutes(from, to);
+  if (!routes.length){
     titleEl.textContent = `${from} → ${to}`;
-    tvShowMessage(`No corridor for <strong>${escapeHtml(from)} → ${escapeHtml(to)}</strong> yet.`);
+    tvShowMessage(`No mapped road links <strong>${escapeHtml(from)}</strong> and <strong>${escapeHtml(to)}</strong> yet.`);
     return;
   }
-  const changed = !tvCurrentCorridor || tvNewsKey(tvCurrentCorridor) !== tvNewsKey(corr);
-  tvCurrentCorridor = corr;
-  titleEl.textContent = `${corr.from} → ${corr.to}`;
-  if (changed) tvNews = { status: 'idle', key: '', data: null, error: '' };
+  // Same trip as before (a refresh, or only the time changed): keep the
+  // traveller on the option they were looking at.
+  const sameTrip = tvRoutes.length && tvRoutes[0].from === from && tvRoutes[0].to === to;
+  const keepKey = sameTrip && tvCurrentCorridor ? tvCurrentCorridor.key : null;
+  tvRoutes = routes;
+  tvSelectedRoute = Math.max(0, routes.findIndex(route => route.key === keepKey));
+  tvCurrentCorridor = routes[tvSelectedRoute];
+  titleEl.textContent = `${from} → ${to}`;
   tvRenderAssessment(true);
-  tvLoadNews(corr, false);
+  routes.forEach(route => tvLoadNews(route, false));
 }
 
-// Destinations reachable from a town, so the two menus can never disagree.
-function tvDestinations(from){
-  return [...new Set(TV_CORRIDORS.flatMap(c => c.from === from ? [c.to] : c.to === from ? [c.from] : []))].sort();
-}
-
+// The destination menu offers everywhere except where you are starting.
 function tvFillDestinations(){
   const fromSel = document.getElementById('tvFrom'), toSel = document.getElementById('tvTo');
-  const options = tvDestinations(fromSel.value);
+  const options = tvTowns().filter(town => town !== fromSel.value);
   const keep = options.includes(toSel.value) ? toSel.value : options[0];
   toSel.innerHTML = options.map(t => `<option value="${t}">${t}</option>`).join('');
   toSel.value = keep;
 }
 
-function initTravelView(){
-  const towns = [...new Set(TV_CORRIDORS.flatMap(c => [c.from, c.to]))].sort();
+function swapTravelEnds(){
   const fromSel = document.getElementById('tvFrom'), toSel = document.getElementById('tvTo');
-  fromSel.innerHTML = towns.map(t => `<option value="${t}">${t}</option>`).join('');
+  const from = fromSel.value, to = toSel.value;
+  fromSel.value = to;
+  tvFillDestinations();
+  toSel.value = from;
+  assessRoute();
+}
+
+function initTravelView(){
+  const fromSel = document.getElementById('tvFrom'), toSel = document.getElementById('tvTo');
+  fromSel.innerHTML = tvTowns().map(t => `<option value="${t}">${t}</option>`).join('');
   fromSel.value = 'Kaduna';
   tvFillDestinations();
   toSel.value = 'Abuja (FCT)';
@@ -676,7 +942,7 @@ function initTravelView(){
   // Keep the reports current for as long as the tab stays open on a route.
   tvNewsTimer = setInterval(() => {
     const visible = document.getElementById('travelView').classList.contains('tv-active');
-    if (visible && tvCurrentCorridor && tvNews.status !== 'loading') tvLoadNews(tvCurrentCorridor, true);
+    if (visible && tvRoutes.length) refreshTravelNews();
   }, TV_NEWS_REFRESH_MS);
 
   setTimeout(() => { travelMap.invalidateSize(); assessRoute(); }, 120);
