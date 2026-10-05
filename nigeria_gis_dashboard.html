@@ -26,11 +26,11 @@
     </div>
     <div id="topbarHotspotInfo" class="brand-text" style="display:none">
       <div class="brand-name brand-name-hs"><i class="ti ti-flame"></i> Hotspot Analysis</div>
-      <div class="brand-sub">Composite risk scoring across all 37 states · 2004–2026 · ACLED + AWSD</div>
+      <div class="brand-sub">Composite risk scoring across all 37 states · 2004–2026 · ACLED + AWSD + live news</div>
     </div>
     <div id="topbarTravelInfo" class="brand-text" style="display:none">
       <div class="brand-name brand-name-tv"><i class="ti ti-route"></i> Travel Safety</div>
-      <div class="brand-sub">Route-risk advisor · predefined corridors · modelled timing</div>
+      <div class="brand-sub">Route-risk advisor · any town to any town · alternative routes · live news</div>
     </div>
   </div>
 
@@ -266,42 +266,69 @@
 
 <!-- HOTSPOT ANALYSIS VIEW -->
 <div id="hotspotView" class="hotspot-view">
+  <div class="hs-formula-bar">
+    <span class="hs-formula-label">Risk score =</span>
+    <span class="hs-formula" id="hsFormula"></span>
+    <span class="hs-formula-note" id="hsFormulaNote"></span>
+    <span class="hs-formula-right">
+      <span class="hs-updated" id="hsUpdated"></span>
+      <button type="button" class="hs-export-btn" onclick="exportHotspotReport()"><i class="ti ti-download"></i> Export risk report</button>
+    </span>
+  </div>
+
   <div class="hs-content">
 
-    <div>
-      <div class="hs-sec-head">Top 5 Highest Risk States</div>
+    <section>
+      <div class="hs-sec-head">Top 5 highest-risk states</div>
       <div class="hs-top-row" id="hsTopStates"></div>
-    </div>
+    </section>
 
     <div class="hs-main-grid">
-      <div class="hs-map-panel">
-        <div class="hs-sec-head">Risk Intensity Map &mdash; click any zone for details</div>
-        <div id="hotspotMap"></div>
-      </div>
-      <div class="hs-charts-panel">
+      <section class="hs-map-panel">
+        <div class="hs-sec-head">Risk intensity map &mdash; click any zone for details</div>
+        <div class="hs-map-wrap">
+          <div id="hotspotMap"></div>
+          <div class="hs-map-legend">
+            <div class="hs-map-legend-title">Composite risk</div>
+            <div class="hs-map-legend-bar"></div>
+            <div class="hs-map-legend-ends"><span>0 low</span><span>100 critical</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="hs-charts-panel">
         <div class="hs-chart-block">
-          <div class="hs-sec-head">Composite Risk Score &mdash; Top 10 States</div>
-          <div class="hs-chart-frame"><canvas id="hsRiskChart"></canvas></div>
+          <div class="hs-block-head"><i class="ti ti-chart-bar"></i> Composite risk &mdash; top 10 states</div>
+          <div class="hs-bars" id="hsRiskBars"></div>
         </div>
         <div class="hs-chart-block">
-          <div class="hs-sec-head">Attack Actor Breakdown &mdash; Top 5 Hotspots</div>
-          <div class="hs-chart-frame"><canvas id="hsActorChart"></canvas></div>
+          <div class="hs-block-head"><i class="ti ti-users"></i> Attack actor breakdown &mdash; top 5 hotspots</div>
+          <div class="hs-bars" id="hsActorBars"></div>
+          <div class="hs-actor-legend" id="hsActorLegend"></div>
         </div>
         <div class="hs-chart-block">
-          <div class="hs-sec-head">Aid Worker Incidents by Year &mdash; Top 3 States</div>
+          <div class="hs-block-head"><i class="ti ti-chart-line"></i> Aid worker incidents by year &mdash; top 3 states</div>
           <div class="hs-chart-frame"><canvas id="hsTrendChart"></canvas></div>
         </div>
-      </div>
+      </section>
     </div>
 
-    <div>
-      <div class="hs-sec-head">Full State Risk Ranking</div>
+    <section class="hs-live-section">
+      <div class="hs-live-head">
+        <div class="hs-block-head"><i class="ti ti-broadcast"></i> Live signals feeding the index</div>
+        <div class="hs-live-summary" id="hsLiveSummary"></div>
+      </div>
+      <div class="hs-live-list" id="hsLiveList"></div>
+    </section>
+
+    <section>
+      <div class="hs-sec-head">Full state risk ranking</div>
       <div class="hs-table-section">
         <div class="hs-table-wrap">
           <table class="hs-table" id="hsRankTable"></table>
         </div>
       </div>
-    </div>
+    </section>
 
   </div>
 </div>
@@ -316,6 +343,7 @@
         <label class="filter-label">From</label>
         <select class="filter-select" id="tvFrom"></select>
       </div>
+      <button type="button" class="tv-swap" onclick="swapTravelEnds()" title="Swap origin and destination"><i class="ti ti-arrows-up-down"></i> Swap</button>
       <div class="filter-group">
         <label class="filter-label">To</label>
         <select class="filter-select" id="tvTo"></select>
@@ -332,30 +360,54 @@
           <button type="button" class="tv-mode" data-mode="Convoy" onclick="selectTravelMode(this)"><i class="ti ti-truck"></i><span>Convoy</span></button>
         </div>
       </div>
-      <button class="apply-btn tv-assess" onclick="assessRoute()"><i class="ti ti-shield-check"></i> Assess this route</button>
+      <button class="apply-btn tv-assess" onclick="assessRoute()"><i class="ti ti-shield-check"></i> Find and assess routes</button>
     </div>
 
-    <div class="tv-sec-label">Route risk rating</div>
+    <div class="tv-sec-label" id="tvOptionsLabel">Route</div>
+    <div class="tv-options" id="tvRouteOptions"></div>
+
+    <div class="tv-sec-label">Selected route</div>
     <div class="panel-card tv-rating-card" id="tvRatingCard">
       <div class="tv-empty">Select a route and tap <strong>Assess this route</strong>.</div>
     </div>
   </aside>
 
-  <!-- CENTER: route map -->
-  <section class="tv-center panel-card">
-    <div class="panel-hd tv-map-hd">
-      <span><i class="ti ti-route"></i> Route Risk Map — <span id="tvRouteTitle">select a route</span></span>
-      <span class="tv-map-note" id="tvStretchNote"></span>
-    </div>
-    <div class="tv-map-wrap">
-      <div id="travelMap"></div>
-      <div class="map-legend tv-legend">
-        <div class="leg-title">Route risk by segment</div>
-        <div class="leg-row"><span class="tv-leg-line tv-leg-low"></span>Low risk</div>
-        <div class="leg-row"><span class="tv-leg-line tv-leg-caution"></span>Caution</div>
-        <div class="leg-row"><span class="tv-leg-line tv-leg-high"></span>High risk</div>
-        <div class="leg-row"><span class="tv-leg-line tv-leg-alt"></span>Safer alternative</div>
+  <!-- CENTER: route map, then what is being reported along it -->
+  <section class="tv-center">
+    <div class="panel-card tv-map-card">
+      <div class="panel-hd tv-map-hd">
+        <span><i class="ti ti-route"></i> Route Risk Map — <span id="tvRouteTitle">select a route</span></span>
+        <span class="tv-map-note" id="tvStretchNote"></span>
       </div>
+      <div class="tv-map-wrap">
+        <div id="travelMap"></div>
+        <div class="map-legend tv-legend">
+          <div class="leg-title">Route risk by segment</div>
+          <div class="leg-row"><span class="tv-leg-line tv-leg-low"></span>Low risk</div>
+          <div class="leg-row"><span class="tv-leg-line tv-leg-caution"></span>Caution</div>
+          <div class="leg-row"><span class="tv-leg-line tv-leg-high"></span>High risk</div>
+          <div class="leg-row"><span class="tv-leg-line tv-leg-alt"></span>Other route options</div>
+          <div class="leg-row"><span class="tv-leg-news"></span>Town with reports</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-card tv-news-card">
+      <div class="tv-news-hd">
+        <div class="panel-hd"><i class="ti ti-news"></i> Reports along this route <span class="tv-news-window">last 7 days</span></div>
+        <div class="tv-news-tools">
+          <div class="tv-news-filters" id="tvNewsFilters">
+            <button type="button" class="tv-news-filter active" data-filter="all" onclick="setTravelNewsFilter(this)">All</button>
+            <button type="button" class="tv-news-filter" data-filter="route" onclick="setTravelNewsFilter(this)">On the road</button>
+            <button type="button" class="tv-news-filter" data-filter="regional" onclick="setTravelNewsFilter(this)">Regional press</button>
+            <button type="button" class="tv-news-filter" data-filter="day" onclick="setTravelNewsFilter(this)">24h</button>
+          </div>
+          <button type="button" class="tv-news-refresh" id="tvNewsRefresh" onclick="refreshTravelNews()" title="Check the sources again"><i class="ti ti-refresh"></i></button>
+        </div>
+      </div>
+      <div class="tv-news-summary" id="tvNewsSummary"></div>
+      <div class="tv-news-list" id="tvNewsList"><div class="tv-empty">Assess a route to see what is being reported along it.</div></div>
+      <div class="tv-news-sources" id="tvNewsSources"></div>
     </div>
   </section>
 
@@ -369,10 +421,10 @@
         <span><span class="tv-ldot" style="background:var(--green)"></span> Safest <span id="tvSafeWindow">—</span></span>
         <span><span class="tv-ldot" style="background:var(--red)"></span> Peak risk <span id="tvPeakWindow">—</span></span>
       </div>
-      <div class="tv-est-note"><i class="ti ti-info-circle"></i> Modelled estimate of the daylight/dusk risk pattern — not live per-hour data.</div>
+      <div class="tv-est-note" id="tvEstNote"><i class="ti ti-info-circle"></i> Modelled estimate of the daylight/dusk risk pattern — not live per-hour data.</div>
       <div class="tv-depart" id="tvDepart">
         <div class="tv-depart-ico"><i class="ti ti-circle-check"></i></div>
-        <div><div class="tv-depart-lbl">Recommended departure</div><div class="tv-depart-val" id="tvDepartVal">—</div></div>
+        <div><div class="tv-depart-lbl" id="tvDepartLbl">Recommended departure</div><div class="tv-depart-val" id="tvDepartVal">—</div></div>
       </div>
     </div>
     <div class="panel-card">
@@ -389,6 +441,7 @@
 </div>
 
 <script src="app.js"></script>
+<script src="hotspot.js"></script>
 <script src="travel_safety.js"></script>
 
 <!-- ── LIVE REPORT MODAL ── -->

@@ -18,6 +18,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 
+from route_news import build_route_news
+
 
 ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 REPORTS_DIR_NAME = "reports"
@@ -452,6 +454,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/reports":
             self.handle_get_reports()
             return
+        if parsed.path == "/api/route-news":
+            self.handle_route_news(parse_qs(parsed.query))
+            return
         parts = parsed.path.split("/")
         if (len(parts) == 6 and parts[1] == "api" and parts[2] == "reports"
                 and parts[4] == "media"):
@@ -506,6 +511,26 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(message)))
             self.end_headers()
             self.wfile.write(message)
+
+    def handle_route_news(self, query):
+        """News for the states and towns along a road (Travel Safety)."""
+        def values(name):
+            return [part.strip() for part in ",".join(query.get(name, [])).split("|") if part.strip()]
+
+        try:
+            payload = build_route_news(
+                Path(self.directory),
+                states=values("states"),
+                places=values("places"),
+                hubs=values("hubs"),
+                label=(query.get("label", [""])[0])[:80],
+                days=(query.get("days", [None])[0]),
+            )
+            self.send_json(200, payload)
+        except ValueError as exc:
+            self.send_json(400, {"error": str(exc)})
+        except Exception as exc:  # pragma: no cover - best-effort endpoint
+            self.send_json(500, {"error": str(exc)})
 
     def handle_get_reports(self):
         reports = []

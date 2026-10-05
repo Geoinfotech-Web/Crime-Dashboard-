@@ -283,6 +283,8 @@ function renderLiveNews(articles, refreshedAt, refreshMinutes, lookbackHours = 2
   }
 
   updateChartsWithLiveReports(articles);
+  // The hotspot index reads the same feed; hotspot.js loads after this file.
+  if (typeof onHotspotLiveUpdate === 'function') onHotspotLiveUpdate();
 }
 
 function clearNewsTimers() {
@@ -1199,7 +1201,6 @@ let hotspotMapInstance = null;
 let hotspotInitialized = false;
 let cachedHotspots = null;
 let mainTileLayer = null;
-let hotspotTileLayer = null;
 // Esri Canvas basemaps — keyless, free for use, ideal grey canvas for data viz.
 // (Carto's basemaps.cartocdn.com now require a registered API key.)
 const DARK_TILE = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
@@ -1213,61 +1214,6 @@ function hsRegionToState(region) {
   if (exact) return exact.state;
   const partial = stateData.find(s => s.state.startsWith(region) || region.startsWith(s.state));
   return partial ? partial.state : null;
-}
-
-function computeHotspots() {
-  const awsdByState = new Map();
-  awsdData.forEach(r => {
-    const stateName = hsRegionToState(r.region);
-    if (!stateName) return;
-    if (!awsdByState.has(stateName)) awsdByState.set(stateName, { count: 0, affected: 0, records: [] });
-    const entry = awsdByState.get(stateName);
-    entry.count++;
-    entry.affected += r.affected;
-    entry.records.push(r);
-  });
-
-  const maxDeaths    = Math.max(...stateData.map(s => s.deaths));
-  const maxIncidents = Math.max(...stateData.map(s => s.incidents));
-  const maxAwsd      = Math.max(...stateData.map(s => awsdByState.get(s.state)?.count || 0), 1);
-  const maxAffected  = Math.max(...stateData.map(s => awsdByState.get(s.state)?.affected || 0), 1);
-
-  return stateData.map(s => {
-    const awsd = awsdByState.get(s.state) || { count: 0, affected: 0, records: [] };
-    const deathScore    = (s.deaths     / maxDeaths)    * 100;
-    const incidentScore = (s.incidents  / maxIncidents) * 100;
-    const awsdScore     = (awsd.count   / maxAwsd)      * 100;
-    const affectedScore = (awsd.affected / maxAffected) * 100;
-    const composite = deathScore * 0.45 + incidentScore * 0.30 + awsdScore * 0.15 + affectedScore * 0.10;
-    return {
-      ...s,
-      awsdCount:    awsd.count,
-      awsdAffected: awsd.affected,
-      awsdRecords:  awsd.records,
-      composite:    Math.round(composite * 10) / 10
-    };
-  }).sort((a, b) => b.composite - a.composite);
-}
-
-function hsColor(score) {
-  if (score >= 75) return '#f85149';
-  if (score >= 50) return '#d29922';
-  if (score >= 25) return '#58a6ff';
-  return '#3fb950';
-}
-
-function hsLabel(score) {
-  if (score >= 75) return 'Critical';
-  if (score >= 50) return 'High';
-  if (score >= 25) return 'Elevated';
-  return 'Moderate';
-}
-
-function hsBadgeClass(score) {
-  if (score >= 75) return 'hs-badge-critical';
-  if (score >= 50) return 'hs-badge-high';
-  if (score >= 25) return 'hs-badge-elevated';
-  return 'hs-badge-moderate';
 }
 
 function toggleTheme() {
@@ -1292,10 +1238,7 @@ function applyTheme(theme) {
     mainTileLayer = L.tileLayer(isLight ? LIGHT_TILE : DARK_TILE, TILE_OPTS).addTo(mapInstance);
   }
 
-  if (hotspotInitialized && cachedHotspots) {
-    renderHsMap(cachedHotspots);
-    renderHsCharts(cachedHotspots);
-  }
+  refreshHotspotTheme();
 
   applyThemeToCharts();
 }
@@ -1372,235 +1315,12 @@ function openHotspotView() { showView('hotspot'); }
 function closeHotspotView() { showView('dashboard'); }
 function openTravelView() { showView('travel'); }
 
-function initHotspotView() {
-  cachedHotspots = computeHotspots();
-  renderHsKPIs(cachedHotspots);
-  renderHsMap(cachedHotspots);
-  renderHsCharts(cachedHotspots);
-  renderHsTable(cachedHotspots);
-}
-
-function renderHsKPIs(hotspots) {
-  const container = document.getElementById('hsTopStates');
-  container.innerHTML = hotspots.slice(0, 5).map((s, i) => {
-    const color = hsColor(s.composite);
-    return `<div class="hs-kpi-card">
-      <div class="hs-kpi-accent" style="background:${color}"></div>
-      <div class="hs-kpi-rank">#${i + 1} Hotspot</div>
-      <div class="hs-kpi-state">${escapeHtml(s.state)}</div>
-      <div class="hs-kpi-score" style="color:${color}">${s.composite.toFixed(1)}</div>
-      <div class="hs-kpi-score-label">Risk Score / 100</div>
-      <div class="hs-kpi-detail">${s.deaths.toLocaleString()} deaths<br>${s.incidents.toLocaleString()} incidents<br>${s.awsdCount} aid worker incidents</div>
-      <span class="hs-kpi-badge ${hsBadgeClass(s.composite)}">${hsLabel(s.composite)}</span>
-    </div>`;
-  }).join('');
-}
-
-function renderHsMap(hotspots) {
-  if (hotspotMapInstance) { hotspotMapInstance.remove(); hotspotMapInstance = null; }
-
-  hotspotMapInstance = L.map('hotspotMap', { center: [9.0, 8.0], zoom: 6, zoomControl: true });
-  const hsTile = document.documentElement.getAttribute('data-theme') === 'light' ? LIGHT_TILE : DARK_TILE;
-  hotspotTileLayer = L.tileLayer(hsTile, TILE_OPTS).addTo(hotspotMapInstance);
-
-  const maxScore = hotspots[0].composite;
-  hotspots.forEach(s => {
-    const color  = hsColor(s.composite);
-    const radius = Math.max(12, (s.composite / maxScore) * 60);
-
-    // Outer glow
-    L.circleMarker([s.lat, s.lng], {
-      radius: radius + 10, fillColor: color, fillOpacity: 0.07,
-      color: color, weight: 1, opacity: 0.2
-    }).addTo(hotspotMapInstance);
-
-    // Main zone
-    L.circleMarker([s.lat, s.lng], {
-      radius, fillColor: color, fillOpacity: 0.38,
-      color: color, weight: 2, opacity: 0.9
-    }).bindPopup(`
-      <div class="popup-title">&#x1F525; ${escapeHtml(s.state)}</div>
-      <div class="popup-row"><span>Risk Score</span><span style="color:${color};font-size:15px;font-weight:700">${s.composite.toFixed(1)}</span></div>
-      <div class="popup-row"><span>Risk Level</span><span style="color:${color};font-weight:600">${hsLabel(s.composite)}</span></div>
-      <div class="popup-row"><span>Total Deaths</span><span class="popup-metric-danger">${s.deaths.toLocaleString()}</span></div>
-      <div class="popup-row"><span>Incidents</span><span>${s.incidents.toLocaleString()}</span></div>
-      <div class="popup-row"><span>Aid Worker Incidents</span><span>${s.awsdCount}</span></div>
-      <div class="popup-row"><span>Aid Workers Affected</span><span>${s.awsdAffected}</span></div>
-    `).addTo(hotspotMapInstance);
-  });
-
-  // Map legend
-  const legend = L.control({ position: 'bottomleft' });
-  legend.onAdd = () => {
-    const div = L.DomUtil.create('div');
-    const lt = document.documentElement.getAttribute('data-theme') === 'light';
-    const lgBg  = lt ? 'rgba(204,225,247,0.96)' : 'rgba(13,17,23,0.92)';
-    const lgBdr = lt ? 'rgba(10,50,110,0.20)' : 'rgba(255,255,255,0.14)';
-    const lgHd  = lt ? '#2d5882' : '#8b949e';
-    const lgTxt = lt ? '#0d2647' : '#e6edf3';
-    const lgSub = lt ? '#2d5882' : '#6e7681';
-    const lgDiv = lt ? 'rgba(10,50,110,0.12)' : 'rgba(255,255,255,0.08)';
-    div.style.cssText = `background:${lgBg};border:1px solid ${lgBdr};border-radius:10px;padding:10px 14px;font-family:Segoe UI,sans-serif;`;
-    div.innerHTML = `
-      <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:${lgHd};margin-bottom:8px;">Risk Level</div>
-      ${[['#f85149','Critical (≥75)'],['#d29922','High (≥50)'],['#58a6ff','Elevated (≥25)'],['#3fb950','Moderate (<25)']].map(([c, l]) => `
-        <div style="display:flex;align-items:center;gap:7px;margin-bottom:4px;font-size:10px;color:${lgTxt};">
-          <div style="width:11px;height:11px;border-radius:50%;background:${c};flex-shrink:0;"></div>${l}
-        </div>`).join('')}
-      <div style="font-size:9px;color:${lgSub};margin-top:6px;border-top:1px solid ${lgDiv};padding-top:6px;">Circle size ∝ risk score</div>
-    `;
-    return div;
-  };
-  legend.addTo(hotspotMapInstance);
-  setTimeout(() => hotspotMapInstance.invalidateSize(), 200);
-}
-
 function getChartThemeColors() {
   const isLight = document.documentElement.getAttribute('data-theme') === 'light';
   return {
     tc: isLight ? '#4a5568' : '#8b949e',
     gc: isLight ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.06)'
   };
-}
-
-function renderHsCharts(hotspots) {
-  const { tc, gc } = getChartThemeColors();
-
-  // ① Risk score bar chart — top 10 states
-  const top10 = hotspots.slice(0, 10);
-  const existingRisk = Chart.getChart('hsRiskChart');
-  if (existingRisk) existingRisk.destroy();
-  new Chart(document.getElementById('hsRiskChart'), {
-    type: 'bar',
-    data: {
-      labels: top10.map(s => s.state === 'FCT (Abuja)' ? 'Abuja' : s.state),
-      datasets: [{
-        label: 'Risk Score',
-        data: top10.map(s => s.composite),
-        backgroundColor: top10.map(s => hsColor(s.composite) + 'aa'),
-        borderColor:     top10.map(s => hsColor(s.composite)),
-        borderWidth: 1, borderRadius: 4
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { grid: { display: false }, ticks: { color: tc, font: { size: 9 } } },
-        y: { beginAtZero: true, max: 100, grid: { color: gc }, ticks: { color: tc, font: { size: 9 } } }
-      }
-    }
-  });
-
-  // ② Actor breakdown doughnut — top 5 hotspot states
-  const top5States = new Set(hotspots.slice(0, 5).map(s => s.state));
-  const top5Records = awsdData.filter(r => {
-    const sn = hsRegionToState(r.region);
-    return sn && top5States.has(sn);
-  });
-  const actorMap = new Map();
-  top5Records.forEach(r => {
-    let actor = r.actor;
-    if (actor.includes('Non-state armed group')) actor = 'Non-state Armed Group';
-    else if (actor.includes('Criminal'))          actor = 'Criminal';
-    else if (actor.includes('Host state') || actor.includes('paramilitary')) actor = 'State / Military';
-    else if (actor.includes('Staff'))             actor = 'Internal';
-    else                                          actor = 'Unknown';
-    actorMap.set(actor, (actorMap.get(actor) || 0) + 1);
-  });
-  const actorColors = {
-    'Non-state Armed Group': '#f85149', Criminal: '#d29922',
-    'State / Military': '#58a6ff', Internal: '#bc8cff', Unknown: '#8b949e'
-  };
-  const actorLabels = [...actorMap.keys()];
-  const existingActor = Chart.getChart('hsActorChart');
-  if (existingActor) existingActor.destroy();
-  new Chart(document.getElementById('hsActorChart'), {
-    type: 'doughnut',
-    data: {
-      labels: actorLabels,
-      datasets: [{
-        data: actorLabels.map(l => actorMap.get(l)),
-        backgroundColor: actorLabels.map(l => (actorColors[l] || '#8b949e') + 'cc'),
-        borderColor:     actorLabels.map(l =>  actorColors[l] || '#8b949e'),
-        borderWidth: 1.5
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'right', labels: { color: tc, font: { size: 9 }, boxWidth: 10, padding: 6 } }
-      }
-    }
-  });
-
-  // ③ Annual aid-worker incident trend — top 3 states
-  const top3 = hotspots.slice(0, 3);
-  const years = [...new Set(awsdData.map(r => r.year))].sort((a, b) => a - b);
-  const trendPalette = ['#f85149', '#d29922', '#58a6ff'];
-  const existingTrend = Chart.getChart('hsTrendChart');
-  if (existingTrend) existingTrend.destroy();
-  new Chart(document.getElementById('hsTrendChart'), {
-    type: 'line',
-    data: {
-      labels: years,
-      datasets: top3.map((s, i) => {
-        const regionKey = s.state === 'FCT (Abuja)' ? 'FCT' : s.state;
-        const yearCounts = new Map();
-        awsdData.filter(r => r.region === regionKey || r.region === s.state)
-                .forEach(r => yearCounts.set(r.year, (yearCounts.get(r.year) || 0) + 1));
-        return {
-          label: s.state === 'FCT (Abuja)' ? 'Abuja' : s.state,
-          data: years.map(y => yearCounts.get(y) || 0),
-          borderColor: trendPalette[i],
-          backgroundColor: trendPalette[i] + '22',
-          fill: true, tension: 0.3, pointRadius: 2,
-          pointBackgroundColor: trendPalette[i]
-        };
-      })
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'top', labels: { color: tc, font: { size: 9 }, boxWidth: 10, padding: 6 } } },
-      scales: {
-        x: { grid: { color: gc }, ticks: { color: tc, font: { size: 9 }, maxTicksLimit: 8 } },
-        y: { beginAtZero: true, grid: { color: gc }, ticks: { color: tc, font: { size: 9 }, precision: 0 } }
-      }
-    }
-  });
-}
-
-function renderHsTable(hotspots) {
-  const maxScore = hotspots[0].composite;
-  document.getElementById('hsRankTable').innerHTML = `
-    <thead><tr>
-      <th>#</th><th>State</th><th style="min-width:180px">Risk Score</th>
-      <th>Level</th><th>Deaths</th><th>Incidents</th>
-      <th>AWSD Incidents</th><th>Workers Affected</th>
-    </tr></thead>
-    <tbody>
-      ${hotspots.map((s, i) => {
-        const color = hsColor(s.composite);
-        const pct   = Math.round((s.composite / maxScore) * 100);
-        return `<tr>
-          <td style="color:var(--text3)">${i + 1}</td>
-          <td style="font-weight:600">${escapeHtml(s.state)}</td>
-          <td>
-            <div class="hs-score-bar">
-              <span class="hs-score-val" style="color:${color}">${s.composite.toFixed(1)}</span>
-              <div class="hs-score-track">
-                <div class="hs-score-fill" style="width:${pct}%;background:${color}"></div>
-              </div>
-            </div>
-          </td>
-          <td><span class="hs-kpi-badge ${hsBadgeClass(s.composite)}">${hsLabel(s.composite)}</span></td>
-          <td style="color:var(--red)">${s.deaths.toLocaleString()}</td>
-          <td>${s.incidents.toLocaleString()}</td>
-          <td>${s.awsdCount}</td>
-          <td>${s.awsdAffected}</td>
-        </tr>`;
-      }).join('')}
-    </tbody>`;
 }
 
 // ════════════════════════════════════════════════════════════════
