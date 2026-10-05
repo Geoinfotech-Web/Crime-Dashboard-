@@ -1,0 +1,87 @@
+{
+  "refreshMinutes": 1,
+  "lookbackHours": 24,
+  "maxItems": 30,
+  "keywords": [
+    "kidnap",
+    "kidnapp",
+    "abduct",
+    "bandit",
+    "Boko Haram",
+    "ISWAP",
+    "terror",
+    "attack",
+    "killed",
+    "security",
+    "aid worker",
+    "humanitarian"
+  ],
+  "locationKeywords": [
+    "Nigeria",
+    "Nigerian",
+    "Abuja",
+    "Lagos",
+    "Borno",
+    "Kaduna",
+    "Katsina",
+    "Zamfara",
+    "Niger State",
+    "Plateau",
+    "Benue",
+    "Yobe",
+    "Adamawa",
+    "Sokoto",
+    "Oyo",
+    "Kano"
+  ],
+  "feeds": [
+    {
+      "name": "HumAngle",
+      "url": "https://humanglemedia.com/feed/"
+    },
+    {
+      "name": "Daily Trust",
+      "url": "https://dailytrust.com/feed/"
+    },
+    {
+      "name": "Channels TV",
+      "url": "https://www.channelstv.com/feed/"
+    },
+    {
+      "name": "TheCable",
+      "url": "https://www.thecable.ng/feed/"
+    },
+    {
+      "name": "Google News Nigeria Security",
+      "url": "https://news.google.com/rss/search?q=Nigeria%20kidnapping%20OR%20banditry%20OR%20Boko%20Haram%20OR%20ISWAP&hl=en-NG&gl=NG&ceid=NG:en"
+    },
+    {
+      "name": "Google News Nigeria Kidnapping",
+      "url": "https://news.google.com/rss/search?q=Nigeria%20kidnap%20OR%20abduction%20OR%20bandits&hl=en-NG&gl=NG&ceid=NG:en"
+    },
+    {
+      "name": "Google News Northeast Nigeria",
+      "url": "https://news.google.com/rss/search?q=Borno%20OR%20Yobe%20OR%20Adamawa%20Boko%20Haram%20OR%20ISWAP&hl=en-NG&gl=NG&ceid=NG:en"
+    },
+    {
+      "name": "Google News HumAngle Security",
+      "url": "https://news.google.com/rss/search?q=site%3Ahumanglemedia.com%20Nigeria%20security%20OR%20kidnapping%20OR%20Boko%20Haram&hl=en-NG&gl=NG&ceid=NG:en"
+    },
+    {
+      "name": "Google News Premium Times Security",
+      "url": "https://news.google.com/rss/search?q=site%3Apremiumtimesng.com%20Nigeria%20security%20OR%20kidnapping%20OR%20banditry&hl=en-NG&gl=NG&ceid=NG:en"
+    },
+    {
+      "name": "Google News Channels TV Security",
+      "url": "https://news.google.com/rss/search?q=site%3Achannelstv.com%20Nigeria%20security%20OR%20kidnap%20OR%20terrorists&hl=en-NG&gl=NG&ceid=NG:en"
+    },
+    {
+      "name": "Google News TheCable Security",
+      "url": "https://news.google.com/rss/search?q=site%3Athecable.ng%20Nigeria%20security%20OR%20gunmen%20OR%20kidnap&hl=en-NG&gl=NG&ceid=NG:en"
+    },
+    {
+      "name": "Google News Guardian Nigeria Security",
+      "url": "https://news.google.com/rss/search?q=site%3Aguardian.ng%20Nigeria%20security%20OR%20kidnapping%20OR%20terror&hl=en-NG&gl=NG&ceid=NG:en"
+    }
+  ]
+}

@@ -1,0 +1,513 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nigeria GIS - Crime and Security Incidents Dashboard</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="vendor/tabler-icons/tabler-icons.min.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<link rel="stylesheet" href="styles.css">
+<script>(function(){var t=localStorage.getItem('dashboard-theme')||'dark';document.documentElement.setAttribute('data-theme',t);})()</script>
+</head>
+<body>
+
+<!-- ═══ TOP BAR ═══ -->
+<header class="topbar">
+  <div class="topbar-left">
+    <div class="brand-logo"><img src="logo.png" alt="GeoSentry logo" class="brand-logo-img"></div>
+    <div id="topbarDashboardInfo" class="brand-text">
+      <div class="brand-name">GeoSentry <span class="brand-ng">NG</span></div>
+      <div class="brand-sub"><span class="live-dot"></span> <span id="dashboardSubtitle">Live intelligence · 37 states</span></div>
+    </div>
+    <div id="topbarHotspotInfo" class="brand-text" style="display:none">
+      <div class="brand-name brand-name-hs"><i class="ti ti-flame"></i> Hotspot Analysis</div>
+      <div class="brand-sub">Composite risk scoring across all 37 states · 2004–2026 · ACLED + AWSD</div>
+    </div>
+  </div>
+
+  <div class="topbar-search">
+    <i class="ti ti-search"></i>
+    <input type="text" id="globalSearch" placeholder="Search a state, LGA, incident type or source…" autocomplete="off" oninput="handleGlobalSearch(this.value)">
+  </div>
+
+  <div class="topbar-actions">
+    <button class="icon-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Switch theme"><i class="ti ti-sun-high"></i></button>
+    <button class="icon-btn icon-btn-badge" onclick="openReportsViewer()" title="View submitted reports"><i class="ti ti-clipboard-list"></i><span class="icon-badge" id="rvMenuBadge" style="display:none"></span></button>
+    <a class="icon-btn" href="live_rss_news_export.csv" download title="Export live report feed (CSV)"><i class="ti ti-download"></i></a>
+  </div>
+</header>
+
+<!-- ═══ NAV TABS ═══ -->
+<nav class="navtabs" id="navTabs">
+  <div class="navtabs-left">
+    <button class="nav-tab active" data-view="dashboard" onclick="navTo('dashboard')"><i class="ti ti-layout-dashboard"></i><span>Dashboard</span></button>
+    <button class="nav-tab" data-view="hotspot" onclick="navTo('hotspot')"><i class="ti ti-flame"></i><span>Hotspot Analysis</span></button>
+    <button class="nav-tab" data-view="report" onclick="navTo('report')"><i class="ti ti-broadcast"></i><span>Live Report</span></button>
+  </div>
+  <div class="navtabs-right">
+    <div class="seg-control" id="rangeControl">
+      <button class="seg-btn" data-range="24h" onclick="setRange(this)">24h</button>
+      <button class="seg-btn" data-range="7d" onclick="setRange(this)">7d</button>
+      <button class="seg-btn active" data-range="30d" onclick="setRange(this)">30d</button>
+      <button class="seg-btn" data-range="all" onclick="setRange(this)">All</button>
+    </div>
+    <span class="nav-status" id="navStatus"><span class="nav-status-dot"></span> <span id="navStatusText">Connecting…</span></span>
+  </div>
+</nav>
+
+<!-- ═══ KPI ROW ═══ -->
+<div class="kpi-row" id="dashKpiRow">
+  <div class="gkpi gkpi-selected" id="matchKpiCard">
+    <div class="gkpi-top"><div class="gkpi-ico blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg></div></div>
+    <div class="gkpi-label">Matching Incidents</div>
+    <div class="gkpi-value" id="matchKpi">--</div>
+    <div class="gkpi-sub" id="matchKpiSub">of -- · -- states</div>
+  </div>
+  <div class="gkpi">
+    <div class="gkpi-top"><div class="gkpi-ico red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c3.5 4.5 6 7.5 6 11a6 6 0 0 1-12 0c0-3.5 2.5-6.5 6-11z"/></svg></div><svg class="spark" id="spark-deaths" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
+    <div class="gkpi-label">Total Deaths</div>
+    <div class="gkpi-value red" id="totalDeathsKpi">--</div>
+    <div class="gkpi-delta up">↑ 4.2% vs prev</div>
+  </div>
+  <div class="gkpi">
+    <div class="gkpi-top"><div class="gkpi-ico orange"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 16.5h.01M10.3 4 3 17a2 2 0 0 0 1.7 3h14.6a2 2 0 0 0 1.7-3L13.7 4a2 2 0 0 0-3.4 0z"/></svg></div><svg class="spark" id="spark-incidents" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
+    <div class="gkpi-label">Incidents</div>
+    <div class="gkpi-value orange" id="totalIncidentsKpi">--</div>
+    <div class="gkpi-delta up">↑ 2.1% vs prev</div>
+  </div>
+  <div class="gkpi">
+    <div class="gkpi-top"><div class="gkpi-ico blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3 2.7-5 5.5-5s5.5 2 5.5 5"/><path d="M16 5.2a3 3 0 0 1 0 5.6M17 15c2 .6 3.5 2.2 3.5 4.5"/></svg></div><svg class="spark" id="spark-aid" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
+    <div class="gkpi-label">Affected Aid Workers</div>
+    <div class="gkpi-value blue" id="aidWorkersKpi">--</div>
+    <div class="gkpi-delta down">↓ 1.3% vs prev</div>
+  </div>
+  <div class="gkpi">
+    <div class="gkpi-top"><div class="gkpi-ico green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6-5.3-6-10a6 6 0 1 1 12 0c0 4.7-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg></div><svg class="spark" id="spark-states" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
+    <div class="gkpi-label">States Monitored</div>
+    <div class="gkpi-value green" id="statesKpi">--</div>
+    <div class="gkpi-sub">all states active</div>
+  </div>
+</div>
+
+<!-- ═══ MAIN LAYOUT ═══ -->
+<div class="layout">
+
+  <!-- LEFT: FILTERS & CONTROLS -->
+  <aside class="left-panel">
+    <div class="panel-card">
+      <div class="panel-card-hd"><i class="ti ti-adjustments-horizontal"></i> Filters &amp; Controls</div>
+
+      <div class="filter-group">
+        <label class="filter-label">Attack type</label>
+        <select class="filter-select" id="attackFilter">
+          <option value="all">All types</option>
+          <option value="Kidnapping">Kidnapping</option>
+          <option value="Shooting">Shooting</option>
+          <option value="Bodily assault">Bodily Assault</option>
+          <option value="Kidnap-killing">Kidnap-killing</option>
+          <option value="Complex attack">Complex Attack</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label class="filter-label">Year range</label>
+        <select class="filter-select" id="yearFilter">
+          <option value="2015+">2015 – Present</option>
+          <option value="2022+">2022 – Present</option>
+          <option value="2019-2021">2019 – 2021</option>
+          <option value="2015-2018">2015 – 2018</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label class="filter-label">Actor type</label>
+        <select class="filter-select" id="actorFilter">
+          <option value="all">All actors</option>
+          <option value="Non-state">Non-state Armed Group</option>
+          <option value="Criminal">Criminal</option>
+          <option value="Unknown">Unknown</option>
+          <option value="State">State / Police</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label class="filter-label">Severity</label>
+        <div class="sev-pills" id="sevPills">
+          <button type="button" class="sev-pill sev-crit active" data-sev="Critical" onclick="toggleSevPill(this)">Critical</button>
+          <button type="button" class="sev-pill sev-high" data-sev="High" onclick="toggleSevPill(this)">High</button>
+          <button type="button" class="sev-pill sev-mod" data-sev="Mod" onclick="toggleSevPill(this)">Mod</button>
+        </div>
+      </div>
+
+      <div class="filter-sub">Active filters</div>
+      <div class="active-chips" id="activeFilterChips"></div>
+
+      <div class="filter-actions">
+        <button class="apply-btn" onclick="applyFilters()"><i class="ti ti-filter"></i> Apply filters</button>
+        <button class="reset-btn" onclick="resetFilters()" title="Reset filters"><i class="ti ti-rotate"></i></button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- CENTER: MAP -->
+  <section class="map-center">
+    <div class="panel-hd map-hd"><span><i class="ti ti-map-2"></i> Incident Intensity Map</span><span class="map-hd-note" id="mapCountNote">Showing geolocated incidents</span></div>
+    <div class="map-wrap">
+      <div class="info-pill" id="infoPill">Click any marker for incident details · scroll to zoom</div>
+      <div class="map-layers-panel" id="mapLayersPanel">
+        <button class="mlp-head" id="mlpToggle" onclick="toggleLayersPanel()" title="Map layers">
+          <svg class="mlp-head-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 8l10 5 10-5-10-5z"/><path d="M2 13l10 5 10-5"/></svg>
+          <span>Layers</span><span class="mlp-count" id="mlpCount">1 on</span>
+          <svg class="mlp-caret" id="mlpCaret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="mlp-body" id="mlpBody">
+          <button class="toggle-btn mlp-row" data-layer="bubbles"><span class="mlp-dot mlp-dot-death"></span><span class="mlp-name">Aid incidents by state</span><span class="mlp-switch"></span></button>
+          <button class="toggle-btn mlp-row active" data-layer="points"><span class="mlp-dot mlp-dot-aid"></span><span class="mlp-name">Aid incidents</span><span class="mlp-switch"></span></button>
+          <button class="toggle-btn mlp-row" data-layer="heat"><span class="mlp-dot mlp-dot-heat"></span><span class="mlp-name">Density scatter</span><span class="mlp-switch"></span></button>
+          <button class="toggle-btn mlp-row" data-layer="checkpoints"><span class="mlp-dot mlp-dot-cp"></span><span class="mlp-name">Checkpoints</span><span class="mlp-switch"></span></button>
+        </div>
+      </div>
+      <div id="map"></div>
+      <div class="map-legend" id="mapLegend">
+        <div class="leg-section" data-legend="bubbles">
+          <div class="leg-title">Aid incidents by state (filtered)</div>
+          <div class="leg-row"><span class="leg-swatch" style="background:#7a0a0e"></span>Highest</div>
+          <div class="leg-row"><span class="leg-swatch" style="background:#b11419"></span>High</div>
+          <div class="leg-row"><span class="leg-swatch" style="background:#e23b36"></span>Medium</div>
+          <div class="leg-row"><span class="leg-swatch" style="background:#ff5a5f"></span>Low</div>
+          <div class="leg-row"><span class="leg-swatch" style="background:#2a3344"></span>None</div>
+        </div>
+        <div class="leg-section" data-legend="points">
+          <div class="leg-title">Aid Worker Incidents</div>
+          <div class="leg-row"><div class="legend-dot legend-dot-kidnap"></div>Kidnapping</div>
+          <div class="leg-row"><div class="legend-dot legend-dot-shooting"></div>Shooting/Killing</div>
+          <div class="leg-row"><div class="legend-dot legend-dot-assault"></div>Assault/Other</div>
+        </div>
+        <div class="leg-section" data-legend="heat">
+          <div class="leg-title">Density Scatter</div>
+          <div class="leg-row"><span class="leg-heat-swatch"></span>Incident density</div>
+        </div>
+        <div class="leg-section" data-legend="checkpoints">
+          <div class="leg-title">Checkpoints</div>
+          <div class="leg-row"><div class="cp-legend cp-police-leg"></div>Police</div>
+          <div class="leg-row"><div class="cp-legend cp-military-leg"></div>Military</div>
+          <div class="leg-row"><div class="cp-legend cp-joint-leg"></div>Joint</div>
+          <div class="leg-row"><div class="cp-legend cp-customs-leg"></div>Customs</div>
+        </div>
+      </div>
+    </div>
+    <div class="time-slider-bar">
+      <button class="ts-play" id="tsPlay" onclick="toggleTimePlay()" title="Play through years">
+        <svg class="ts-play-ico" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>
+      </button>
+      <span class="ts-year ts-year-min">2004</span>
+      <input type="range" id="timeSlider" class="ts-range" min="2004" max="2026" value="2026" step="1" oninput="onTimeSlider(this.value)">
+      <span class="ts-year ts-year-max">2026</span>
+      <span class="ts-current" id="tsCurrent">All years</span>
+    </div>
+  </section>
+
+  <!-- RIGHT: LIVE REPORTS -->
+  <aside class="right-panel">
+    <div class="panel-card panel-card-flex">
+      <div class="panel-card-hd"><i class="ti ti-broadcast"></i> Live Reports</div>
+      <div class="lr-tabs">
+        <button class="lr-tab active" data-lrtab="news" onclick="switchReportTab('news')">Regional news</button>
+        <button class="lr-tab" data-lrtab="log" onclick="switchReportTab('log')">Aid worker log</button>
+      </div>
+      <div class="lr-pane" id="lrPaneNews">
+        <div class="live-news-status" id="liveNewsStatus">Loading current reports…</div>
+        <div class="incident-feed live-news-feed" id="liveNewsFeed"></div>
+      </div>
+      <div class="lr-pane" id="lrPaneLog" style="display:none">
+        <div class="incident-feed" id="incidentFeed"></div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- ═══ BOTTOM CHARTS ═══ -->
+<div class="charts-row">
+  <div class="chart-card">
+    <div class="chart-title"><i class="ti ti-chart-line"></i> Historical vs live trend</div>
+    <div class="chart-frame"><canvas id="trendChart" role="img" aria-label="Historical incidents vs current live reports by year"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title"><i class="ti ti-chart-donut-3"></i> Incident type mix</div>
+    <div class="chart-frame"><canvas id="attackDonut" role="img" aria-label="Incident type comparison"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title"><i class="ti ti-chart-bar"></i> Top states — aid incidents</div>
+    <div class="chart-frame chart-frame-bars"><div id="stateRankBars"></div></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title"><i class="ti ti-chart-histogram"></i> Incident volume by month</div>
+    <div class="chart-frame"><canvas id="monthBar" role="img" aria-label="Incident volume by month"></canvas></div>
+  </div>
+</div>
+
+<!-- Hidden legacy stubs: still written to by app.js / live_report.js -->
+<div id="legacyStubs" hidden aria-hidden="true">
+  <span id="dashboardTitle"></span>
+  <span id="deathBadge"></span><span id="incidentBadge"></span><span id="awsdBadge"></span><span id="liveNewsBadge"></span>
+  <span id="liveReportKpi"></span><span id="liveSourceKpi"></span><span id="topSourceKpi"></span><span id="topKeywordKpi"></span>
+  <span id="liveAnalysisNote"></span>
+  <span id="liveNewsIndicatorText"></span>
+  <div id="hamburgerMenu"><button id="hamburgerBtn"></button><div id="hamburgerDropdown"><div id="menuDashboardItems"></div><div id="menuHotspotItems"></div></div></div>
+</div>
+
+<!-- HOTSPOT ANALYSIS VIEW -->
+<div id="hotspotView" class="hotspot-view">
+  <div class="hs-content">
+
+    <div>
+      <div class="hs-sec-head">Top 5 Highest Risk States</div>
+      <div class="hs-top-row" id="hsTopStates"></div>
+    </div>
+
+    <div class="hs-main-grid">
+      <div class="hs-map-panel">
+        <div class="hs-sec-head">Risk Intensity Map &mdash; click any zone for details</div>
+        <div id="hotspotMap"></div>
+      </div>
+      <div class="hs-charts-panel">
+        <div class="hs-chart-block">
+          <div class="hs-sec-head">Composite Risk Score &mdash; Top 10 States</div>
+          <div class="hs-chart-frame"><canvas id="hsRiskChart"></canvas></div>
+        </div>
+        <div class="hs-chart-block">
+          <div class="hs-sec-head">Attack Actor Breakdown &mdash; Top 5 Hotspots</div>
+          <div class="hs-chart-frame"><canvas id="hsActorChart"></canvas></div>
+        </div>
+        <div class="hs-chart-block">
+          <div class="hs-sec-head">Aid Worker Incidents by Year &mdash; Top 3 States</div>
+          <div class="hs-chart-frame"><canvas id="hsTrendChart"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="hs-sec-head">Full State Risk Ranking</div>
+      <div class="hs-table-section">
+        <div class="hs-table-wrap">
+          <table class="hs-table" id="hsRankTable"></table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script src="app.js"></script>
+
+<!-- ── LIVE REPORT MODAL ── -->
+<div id="liveReportModal" class="lr2-modal" onclick="lrHandleBackdrop(event)">
+  <div class="lr2-modal-box">
+
+    <div class="lr2-modal-topbar">
+      <div style="display:flex;align-items:center;gap:9px;">
+        <span class="lr2-pulse-dot"></span>
+        <div>
+          <div class="lr2-modal-title">Live Security Report</div>
+          <div class="lr2-modal-sub">Nigeria GIS Dashboard &middot; Anonymous &amp; Secure</div>
+        </div>
+      </div>
+      <button onclick="closeLiveReport()" title="Close" style="width:34px;height:34px;background:rgba(248,81,73,.15);border:2px solid #f85149;color:#f85149;border-radius:8px;font-size:22px;font-weight:300;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1;padding:0">&times;</button>
+    </div>
+
+    <div class="lr2-hero">
+      <div class="lr2-hero-content">
+        <div class="lr2-hero-badge"><i class="ti ti-broadcast"></i> LIVE REPORT</div>
+        <h1 class="lr2-hero-title">Report a Security Incident</h1>
+        <p class="lr2-hero-sub">Share what you are witnessing. Your identity is never stored or disclosed.</p>
+      </div>
+      <div class="lr2-progress-track">
+        <div class="lr2-prog-step active" id="prog1"><div class="lr2-prog-num">1</div><div class="lr2-prog-lbl">Location</div></div>
+        <div class="lr2-prog-line" id="pline12"></div>
+        <div class="lr2-prog-step" id="prog2"><div class="lr2-prog-num">2</div><div class="lr2-prog-lbl">Incident</div></div>
+        <div class="lr2-prog-line" id="pline23"></div>
+        <div class="lr2-prog-step" id="prog3"><div class="lr2-prog-num">3</div><div class="lr2-prog-lbl">Evidence</div></div>
+        <div class="lr2-prog-line" id="pline34"></div>
+        <div class="lr2-prog-step" id="prog4"><div class="lr2-prog-num">4</div><div class="lr2-prog-lbl">Submit</div></div>
+      </div>
+    </div>
+
+    <form id="reportForm" class="lr2-shell" novalidate>
+
+      <div class="lr2-card">
+        <div class="lr2-card-hd">
+          <div class="lr2-card-icon-wrap lr2-ci-blue"><i class="ti ti-map-pin"></i></div>
+          <div class="lr2-card-hd-text"><div class="lr2-card-title">Your Location</div><div class="lr2-card-sub">Helps responders pinpoint the exact incident location</div></div>
+          <span class="lr-status-pill" id="locationStatusPill">Not shared</span>
+        </div>
+        <div class="lr2-loc-prompt" id="locationPrompt">
+          <div class="lr2-loc-rings-wrap">
+            <div class="lr2-loc-ring lr2-loc-ring1"></div>
+            <div class="lr2-loc-ring lr2-loc-ring2"></div>
+            <div class="lr2-loc-ring lr2-loc-ring3"></div>
+            <div class="lr2-loc-pin-icon"><i class="ti ti-current-location"></i></div>
+          </div>
+          <div class="lr2-loc-prompt-body">
+            <strong class="lr2-loc-prompt-title">Allow location access</strong>
+            <p class="lr2-loc-prompt-desc">Your browser will ask for permission. Coordinates are only used to pin the incident — never linked to your identity.</p>
+            <button type="button" class="lr-btn lr-btn-primary lr2-allow-loc-btn" id="locationBtn" onclick="requestLocation()"><i class="ti ti-current-location"></i> Allow My Location</button>
+            <button type="button" class="lr-btn lr-btn-ghost lr2-skip-btn" onclick="skipLocation()"><i class="ti ti-map-pin-off"></i> Skip for now</button>
+          </div>
+        </div>
+        <div id="locationGranted" style="display:none">
+          <div id="locationMiniMap" class="lr2-mini-map"></div>
+          <div class="lr2-coords-bar" id="locationCoords"></div>
+          <button type="button" class="lr-btn lr-btn-ghost lr2-update-loc-btn" onclick="requestLocation()"><i class="ti ti-refresh"></i> Update location</button>
+        </div>
+      </div>
+
+      <div class="lr2-card">
+        <div class="lr2-card-hd">
+          <div class="lr2-card-icon-wrap lr2-ci-orange"><i class="ti ti-alert-triangle"></i></div>
+          <div class="lr2-card-hd-text"><div class="lr2-card-title">What's Happening</div><div class="lr2-card-sub">Select the incident type and describe what you see</div></div>
+        </div>
+        <div class="lr2-field-label">Incident Type</div>
+        <div class="lr2-cat-grid">
+          <button type="button" class="lr2-cat" data-value="Shooting" onclick="selectCategory(this)"><i class="ti ti-crosshair"></i><span>Shooting</span></button>
+          <button type="button" class="lr2-cat" data-value="Kidnapping" onclick="selectCategory(this)"><i class="ti ti-lock"></i><span>Kidnapping</span></button>
+          <button type="button" class="lr2-cat" data-value="Robbery" onclick="selectCategory(this)"><i class="ti ti-shield-off"></i><span>Robbery</span></button>
+          <button type="button" class="lr2-cat" data-value="Checkpoint" onclick="selectCategory(this)"><i class="ti ti-road"></i><span>Checkpoint</span></button>
+          <button type="button" class="lr2-cat" data-value="Communal Clash" onclick="selectCategory(this)"><i class="ti ti-users"></i><span>Communal Clash</span></button>
+          <button type="button" class="lr2-cat" data-value="Protest" onclick="selectCategory(this)"><i class="ti ti-speakerphone"></i><span>Protest</span></button>
+          <button type="button" class="lr2-cat lr2-cat-active" data-value="Other" onclick="selectCategory(this)"><i class="ti ti-help"></i><span>Other</span></button>
+        </div>
+        <input type="hidden" id="categorySelect" value="Other">
+        <div class="lr2-field-label" style="margin-top:18px">Severity Level</div>
+        <div class="lr2-sev-row">
+          <button type="button" class="lr2-sev lr2-sev-low" data-value="Low" onclick="selectSeverity(this)">Low</button>
+          <button type="button" class="lr2-sev lr2-sev-med lr2-sev-active" data-value="Medium" onclick="selectSeverity(this)">Medium</button>
+          <button type="button" class="lr2-sev lr2-sev-high" data-value="High" onclick="selectSeverity(this)">High</button>
+          <button type="button" class="lr2-sev lr2-sev-crit" data-value="Critical" onclick="selectSeverity(this)">&#9888; Critical</button>
+        </div>
+        <input type="hidden" id="severitySelect" value="Medium">
+        <div class="lr2-field-label" style="margin-top:18px">Describe What You See <span style="color:var(--red)">*</span></div>
+        <textarea class="lr-textarea lr2-big-textarea" id="reportMessage" rows="5" maxlength="1000" placeholder="E.g. Armed men stopped vehicles near Maiduguri road junction, shots fired, civilians fleeing northward…" required></textarea>
+        <div class="lr2-char-row">
+          <div class="lr2-quick-tags">
+            <span class="lr2-qt-lbl">Quick:</span>
+            <button type="button" class="lr2-qt" onclick="appendTag('gunshots heard')">gunshots</button>
+            <button type="button" class="lr2-qt" onclick="appendTag('armed men')">armed men</button>
+            <button type="button" class="lr2-qt" onclick="appendTag('vehicle hijacked')">hijacked vehicle</button>
+            <button type="button" class="lr2-qt" onclick="appendTag('people injured')">injured</button>
+            <button type="button" class="lr2-qt" onclick="appendTag('civilians fleeing')">fleeing</button>
+          </div>
+          <span class="lr-char-count"><span id="messageCharCount">0</span>/1000</span>
+        </div>
+      </div>
+
+      <div class="lr2-card">
+        <div class="lr2-card-hd">
+          <div class="lr2-card-icon-wrap lr2-ci-purple"><i class="ti ti-paperclip"></i></div>
+          <div class="lr2-card-hd-text"><div class="lr2-card-title">Evidence &amp; Media</div><div class="lr2-card-sub">Attach photos or videos from your device</div></div>
+        </div>
+        <div class="lr2-dropzone" id="dropZone">
+          <input type="file" id="mediaInput" accept="image/*,video/*" multiple hidden>
+          <div class="lr2-dz-inner">
+            <div class="lr2-dz-icon"><i class="ti ti-cloud-upload"></i></div>
+            <div class="lr2-dz-title">Drag &amp; drop files here</div>
+            <div class="lr2-dz-or">— or —</div>
+            <label class="lr-btn lr-btn-secondary" for="mediaInput" style="cursor:pointer"><i class="ti ti-folder-open"></i> Browse Files</label>
+            <div class="lr2-dz-hint">Photos &amp; Videos &middot; Max 80 MB per file</div>
+          </div>
+          <div class="lr2-dz-over" id="dropOverlay"><i class="ti ti-cloud-download"></i><span>Drop to attach</span></div>
+        </div>
+        <div class="lr2-media-grid" id="uploadAttachmentList"></div>
+      </div>
+
+      <div class="lr2-card">
+        <div class="lr2-card-hd">
+          <div class="lr2-card-icon-wrap lr2-ci-red"><i class="ti ti-video"></i></div>
+          <div class="lr2-card-hd-text"><div class="lr2-card-title">Live Camera</div><div class="lr2-card-sub">Record footage of the incident right now (max 60 s)</div></div>
+        </div>
+        <div class="lr2-cam-frame" id="cameraFrame" style="display:none">
+          <video id="livePreview" autoplay muted playsinline class="lr2-cam-video"></video>
+          <div class="lr2-cam-hud">
+            <div class="lr2-rec-badge" id="recBadge" style="display:none"><span class="live-dot"></span> REC <span id="recTimer">0:00</span></div>
+            <div class="lr2-rec-prog-outer" id="recProgressWrap" style="display:none"><div class="lr2-rec-prog-inner" id="recProgressBar"></div></div>
+          </div>
+        </div>
+        <div class="lr2-cam-ctrl" id="cameraControlsIdle">
+          <button type="button" class="lr-btn lr-btn-secondary lr2-cam-big-btn" onclick="startCamera()"><i class="ti ti-camera"></i> Start Camera</button>
+          <span class="lr2-cam-hint-txt">Record and attach live footage of the incident</span>
+        </div>
+        <div class="lr2-cam-ctrl" id="cameraControlsReady" style="display:none">
+          <button type="button" class="lr2-rec-start-btn" onclick="startRecording()"><span class="lr2-rec-btn-dot"></span> Start Recording</button>
+          <button type="button" class="lr-btn lr-btn-ghost" onclick="stopCamera()"><i class="ti ti-x"></i> Cancel</button>
+        </div>
+        <div class="lr2-cam-ctrl" id="cameraControlsRecording" style="display:none">
+          <button type="button" class="lr-btn lr-btn-secondary" onclick="stopRecording()"><i class="ti ti-player-stop"></i> Stop &amp; Attach Clip</button>
+        </div>
+        <div class="lr2-cam-ctrl" id="cameraControlsRecorded" style="display:none">
+          <span class="lr-status-pill lr-status-granted"><i class="ti ti-circle-check"></i> Live clip ready</span>
+          <button type="button" class="lr-btn lr-btn-ghost" onclick="discardLiveClip()"><i class="ti ti-refresh"></i> Retake</button>
+        </div>
+        <div class="lr-camera-error" id="cameraError" style="display:none"></div>
+      </div>
+
+      <div class="lr2-card lr2-submit-card">
+        <div class="lr2-submit-summary">
+          <div class="lr2-ss-item" id="ss-location"><i class="ti ti-map-pin-off"></i> Location not shared</div>
+          <div class="lr2-ss-item" id="ss-files"><i class="ti ti-paperclip"></i> No files attached</div>
+          <div class="lr2-ss-item lr2-ss-clip" id="ss-clip" style="display:none"><i class="ti ti-video"></i> Live clip attached</div>
+        </div>
+        <button type="submit" class="lr2-submit-btn" id="submitBtn"><i class="ti ti-send"></i> Submit Report</button>
+        <p class="lr2-privacy-note"><i class="ti ti-shield-check"></i> Anonymous submission — your identity is never stored or disclosed</p>
+        <div class="lr-result-panel" id="resultPanel" style="display:none"></div>
+      </div>
+
+    </form>
+  </div>
+</div>
+
+<!-- ── REPORTS VIEWER MODAL ── -->
+<div id="reportsViewerModal" class="lr2-modal" onclick="rvHandleBackdrop(event)">
+  <div class="lr2-modal-box">
+
+    <div class="lr2-modal-topbar">
+      <div style="display:flex;align-items:center;gap:9px;min-width:0;flex:1">
+        <div class="lr2-card-icon-wrap lr2-ci-blue" style="width:30px;height:30px;font-size:14px;flex-shrink:0">
+          <i class="ti ti-clipboard-list"></i>
+        </div>
+        <div style="min-width:0">
+          <div class="lr2-modal-title">Submitted Reports</div>
+          <div class="rv-modal-sub" id="rvCount">&nbsp;</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;margin-left:12px">
+        <button class="rv-hdr-btn" onclick="loadReports()" title="Refresh"><i class="ti ti-refresh"></i><span>Refresh</span></button>
+        <button onclick="closeReportsViewer()" title="Close" style="width:34px;height:34px;background:rgba(248,81,73,.15);border:2px solid #f85149;color:#f85149;border-radius:8px;font-size:22px;font-weight:300;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1;padding:0">&times;</button>
+      </div>
+    </div>
+
+    <!-- List view -->
+    <div id="rvListView">
+      <div class="rv-list" id="rvList">
+        <div class="rv-state-msg"><i class="ti ti-loader-2 ti-spin"></i><span>Loading&hellip;</span></div>
+      </div>
+    </div>
+
+    <!-- Detail view -->
+    <div id="rvDetailView" style="display:none">
+      <div class="rv-detail-topbar">
+        <button class="lr-btn lr-btn-ghost rv-back-btn" onclick="closeReportDetail()">
+          <i class="ti ti-arrow-left"></i> Back to list
+        </button>
+      </div>
+      <div class="rv-detail-body" id="rvDetailBody"></div>
+    </div>
+
+  </div>
+</div>
+
+<script src="live_report.js"></script>
+</body>
+</html>
+

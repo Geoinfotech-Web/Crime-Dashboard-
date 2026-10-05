@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Live Security Report — Nigeria GIS Dashboard</title>
+<link rel="stylesheet" href="vendor/tabler-icons/tabler-icons.min.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="styles.css">
+<script>(function(){var t=localStorage.getItem('dashboard-theme')||'dark';document.documentElement.setAttribute('data-theme',t);})()</script>
+</head>
+<body class="lr-body">
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="topbar-icon">
+      <img src="logo.png" alt="Dashboard logo" class="topbar-logo">
+    </div>
+    <div>
+      <div class="topbar-title" style="display:flex;align-items:center;gap:7px;">
+        <span class="lr2-pulse-dot"></span>Live Security Report
+      </div>
+      <div class="topbar-sub">Nigeria GIS Dashboard &middot; Anonymous &amp; Secure</div>
+    </div>
+  </div>
+  <div class="topbar-right-group">
+    <a class="hs-back-btn" href="nigeria_gis_dashboard.html"><i class="ti ti-arrow-left"></i> Dashboard</a>
+    <button class="theme-btn" id="themeToggleBtn" onclick="toggleTheme()"><i class="ti ti-palette"></i><span id="themeModeLabel">Dark</span></button>
+  </div>
+</div>
+
+<!-- HERO -->
+<div class="lr2-hero">
+  <div class="lr2-hero-content">
+    <div class="lr2-hero-badge"><i class="ti ti-broadcast"></i> LIVE REPORT</div>
+    <h1 class="lr2-hero-title">Report a Security Incident</h1>
+    <p class="lr2-hero-sub">Share what you are witnessing. Your identity is never stored or disclosed.</p>
+  </div>
+  <div class="lr2-progress-track">
+    <div class="lr2-prog-step active" id="prog1"><div class="lr2-prog-num">1</div><div class="lr2-prog-lbl">Location</div></div>
+    <div class="lr2-prog-line" id="pline12"></div>
+    <div class="lr2-prog-step" id="prog2"><div class="lr2-prog-num">2</div><div class="lr2-prog-lbl">Incident</div></div>
+    <div class="lr2-prog-line" id="pline23"></div>
+    <div class="lr2-prog-step" id="prog3"><div class="lr2-prog-num">3</div><div class="lr2-prog-lbl">Evidence</div></div>
+    <div class="lr2-prog-line" id="pline34"></div>
+    <div class="lr2-prog-step" id="prog4"><div class="lr2-prog-num">4</div><div class="lr2-prog-lbl">Submit</div></div>
+  </div>
+</div>
+
+<form id="reportForm" class="lr2-shell" novalidate>
+
+  <!-- ── STEP 1: LOCATION ── -->
+  <div class="lr2-card" id="card-location">
+    <div class="lr2-card-hd">
+      <div class="lr2-card-icon-wrap lr2-ci-blue"><i class="ti ti-map-pin"></i></div>
+      <div class="lr2-card-hd-text">
+        <div class="lr2-card-title">Your Location</div>
+        <div class="lr2-card-sub">Helps responders pinpoint the exact incident location</div>
+      </div>
+      <span class="lr-status-pill" id="locationStatusPill">Not shared</span>
+    </div>
+
+    <div class="lr2-loc-prompt" id="locationPrompt">
+      <div class="lr2-loc-rings-wrap">
+        <div class="lr2-loc-ring lr2-loc-ring1"></div>
+        <div class="lr2-loc-ring lr2-loc-ring2"></div>
+        <div class="lr2-loc-ring lr2-loc-ring3"></div>
+        <div class="lr2-loc-pin-icon"><i class="ti ti-current-location"></i></div>
+      </div>
+      <div class="lr2-loc-prompt-body">
+        <strong class="lr2-loc-prompt-title">Allow location access</strong>
+        <p class="lr2-loc-prompt-desc">Your browser will ask for permission. Your coordinates are attached to this report only — never linked to your identity.</p>
+        <button type="button" class="lr-btn lr-btn-primary lr2-allow-loc-btn" id="locationBtn" onclick="requestLocation()">
+          <i class="ti ti-current-location"></i> Allow My Location
+        </button>
+        <button type="button" class="lr-btn lr-btn-ghost lr2-skip-btn" onclick="skipLocation()">
+          <i class="ti ti-map-pin-off"></i> Skip for now
+        </button>
+      </div>
+    </div>
+
+    <div id="locationGranted" style="display:none">
+      <div id="locationMiniMap" class="lr2-mini-map"></div>
+      <div class="lr2-coords-bar" id="locationCoords"></div>
+      <button type="button" class="lr-btn lr-btn-ghost lr2-update-loc-btn" onclick="requestLocation()">
+        <i class="ti ti-refresh"></i> Update location
+      </button>
+    </div>
+  </div>
+
+  <!-- ── STEP 2: INCIDENT DETAILS ── -->
+  <div class="lr2-card" id="card-incident">
+    <div class="lr2-card-hd">
+      <div class="lr2-card-icon-wrap lr2-ci-orange"><i class="ti ti-alert-triangle"></i></div>
+      <div class="lr2-card-hd-text">
+        <div class="lr2-card-title">What's Happening</div>
+        <div class="lr2-card-sub">Select the incident type and describe what you see</div>
+      </div>
+    </div>
+
+    <div class="lr2-field-label">Incident Type</div>
+    <div class="lr2-cat-grid">
+      <button type="button" class="lr2-cat" data-value="Shooting" onclick="selectCategory(this)">
+        <i class="ti ti-crosshair"></i><span>Shooting</span>
+      </button>
+      <button type="button" class="lr2-cat" data-value="Kidnapping" onclick="selectCategory(this)">
+        <i class="ti ti-lock"></i><span>Kidnapping</span>
+      </button>
+      <button type="button" class="lr2-cat" data-value="Robbery" onclick="selectCategory(this)">
+        <i class="ti ti-shield-off"></i><span>Robbery</span>
+      </button>
+      <button type="button" class="lr2-cat" data-value="Checkpoint" onclick="selectCategory(this)">
+        <i class="ti ti-road"></i><span>Checkpoint</span>
+      </button>
+      <button type="button" class="lr2-cat" data-value="Communal Clash" onclick="selectCategory(this)">
+        <i class="ti ti-users"></i><span>Communal Clash</span>
+      </button>
+      <button type="button" class="lr2-cat" data-value="Protest" onclick="selectCategory(this)">
+        <i class="ti ti-speakerphone"></i><span>Protest</span>
+      </button>
+      <button type="button" class="lr2-cat lr2-cat-active" data-value="Other" onclick="selectCategory(this)">
+        <i class="ti ti-help"></i><span>Other</span>
+      </button>
+    </div>
+    <input type="hidden" id="categorySelect" value="Other">
+
+    <div class="lr2-field-label" style="margin-top:18px">Severity Level</div>
+    <div class="lr2-sev-row">
+      <button type="button" class="lr2-sev lr2-sev-low" data-value="Low" onclick="selectSeverity(this)">Low</button>
+      <button type="button" class="lr2-sev lr2-sev-med lr2-sev-active" data-value="Medium" onclick="selectSeverity(this)">Medium</button>
+      <button type="button" class="lr2-sev lr2-sev-high" data-value="High" onclick="selectSeverity(this)">High</button>
+      <button type="button" class="lr2-sev lr2-sev-crit" data-value="Critical" onclick="selectSeverity(this)">&#9888; Critical</button>
+    </div>
+    <input type="hidden" id="severitySelect" value="Medium">
+
+    <div class="lr2-field-label" style="margin-top:18px">
+      Describe What You See <span style="color:var(--red)">*</span>
+    </div>
+    <textarea class="lr-textarea lr2-big-textarea" id="reportMessage" rows="5" maxlength="1000"
+      placeholder="E.g. Armed men stopped vehicles near Maiduguri road junction, shots fired, civilians fleeing northward…" required></textarea>
+    <div class="lr2-char-row">
+      <div class="lr2-quick-tags">
+        <span class="lr2-qt-lbl">Quick:</span>
+        <button type="button" class="lr2-qt" onclick="appendTag('gunshots heard')">gunshots</button>
+        <button type="button" class="lr2-qt" onclick="appendTag('armed men')">armed men</button>
+        <button type="button" class="lr2-qt" onclick="appendTag('vehicle hijacked')">hijacked vehicle</button>
+        <button type="button" class="lr2-qt" onclick="appendTag('people injured')">injured</button>
+        <button type="button" class="lr2-qt" onclick="appendTag('civilians fleeing')">fleeing</button>
+      </div>
+      <span class="lr-char-count"><span id="messageCharCount">0</span>/1000</span>
+    </div>
+  </div>
+
+  <!-- ── STEP 3: EVIDENCE ── -->
+  <div class="lr2-card" id="card-evidence">
+    <div class="lr2-card-hd">
+      <div class="lr2-card-icon-wrap lr2-ci-purple"><i class="ti ti-paperclip"></i></div>
+      <div class="lr2-card-hd-text">
+        <div class="lr2-card-title">Evidence &amp; Media</div>
+        <div class="lr2-card-sub">Attach photos or videos from your device</div>
+      </div>
+    </div>
+
+    <div class="lr2-dropzone" id="dropZone">
+      <input type="file" id="mediaInput" accept="image/*,video/*" multiple hidden>
+      <div class="lr2-dz-inner" id="dropZoneInner">
+        <div class="lr2-dz-icon"><i class="ti ti-cloud-upload"></i></div>
+        <div class="lr2-dz-title">Drag &amp; drop files here</div>
+        <div class="lr2-dz-or">— or —</div>
+        <label class="lr-btn lr-btn-secondary" for="mediaInput" style="cursor:pointer">
+          <i class="ti ti-folder-open"></i> Browse Files
+        </label>
+        <div class="lr2-dz-hint">Photos &amp; Videos &middot; Max 80 MB per file</div>
+      </div>
+      <div class="lr2-dz-over" id="dropOverlay">
+        <i class="ti ti-cloud-download"></i>
+        <span>Drop to attach</span>
+      </div>
+    </div>
+
+    <div class="lr2-media-grid" id="uploadAttachmentList"></div>
+  </div>
+
+  <!-- ── STEP 4: LIVE CAMERA ── -->
+  <div class="lr2-card" id="card-camera">
+    <div class="lr2-card-hd">
+      <div class="lr2-card-icon-wrap lr2-ci-red"><i class="ti ti-video"></i></div>
+      <div class="lr2-card-hd-text">
+        <div class="lr2-card-title">Live Camera</div>
+        <div class="lr2-card-sub">Record footage of the incident right now (max 60 s)</div>
+      </div>
+    </div>
+
+    <div class="lr2-cam-frame" id="cameraFrame" style="display:none">
+      <video id="livePreview" autoplay muted playsinline class="lr2-cam-video"></video>
+      <div class="lr2-cam-hud">
+        <div class="lr2-rec-badge" id="recBadge" style="display:none">
+          <span class="live-dot"></span> REC <span id="recTimer">0:00</span>
+        </div>
+        <div class="lr2-rec-prog-outer" id="recProgressWrap" style="display:none">
+          <div class="lr2-rec-prog-inner" id="recProgressBar"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="lr2-cam-ctrl" id="cameraControlsIdle">
+      <button type="button" class="lr-btn lr-btn-secondary lr2-cam-big-btn" onclick="startCamera()">
+        <i class="ti ti-camera"></i> Start Camera
+      </button>
+      <span class="lr2-cam-hint-txt">Record and attach live footage of the incident</span>
+    </div>
+
+    <div class="lr2-cam-ctrl" id="cameraControlsReady" style="display:none">
+      <button type="button" class="lr2-rec-start-btn" onclick="startRecording()">
+        <span class="lr2-rec-btn-dot"></span> Start Recording
+      </button>
+      <button type="button" class="lr-btn lr-btn-ghost" onclick="stopCamera()">
+        <i class="ti ti-x"></i> Cancel
+      </button>
+    </div>
+
+    <div class="lr2-cam-ctrl" id="cameraControlsRecording" style="display:none">
+      <button type="button" class="lr-btn lr-btn-secondary" onclick="stopRecording()">
+        <i class="ti ti-player-stop"></i> Stop &amp; Attach Clip
+      </button>
+    </div>
+
+    <div class="lr2-cam-ctrl" id="cameraControlsRecorded" style="display:none">
+      <span class="lr-status-pill lr-status-granted">
+        <i class="ti ti-circle-check"></i> Live clip ready
+      </span>
+      <button type="button" class="lr-btn lr-btn-ghost" onclick="discardLiveClip()">
+        <i class="ti ti-refresh"></i> Retake
+      </button>
+    </div>
+
+    <div class="lr-camera-error" id="cameraError" style="display:none"></div>
+  </div>
+
+  <!-- ── SUBMIT ── -->
+  <div class="lr2-card lr2-submit-card" id="card-submit">
+    <div class="lr2-submit-summary">
+      <div class="lr2-ss-item" id="ss-location"><i class="ti ti-map-pin-off"></i> Location not shared</div>
+      <div class="lr2-ss-item" id="ss-files"><i class="ti ti-paperclip"></i> No files attached</div>
+      <div class="lr2-ss-item lr2-ss-clip" id="ss-clip" style="display:none"><i class="ti ti-video"></i> Live clip attached</div>
+    </div>
+
+    <button type="submit" class="lr2-submit-btn" id="submitBtn">
+      <i class="ti ti-send"></i> Submit Report
+    </button>
+
+    <p class="lr2-privacy-note">
+      <i class="ti ti-shield-check"></i>
+      Anonymous submission — your identity is never stored or disclosed
+    </p>
+
+    <div class="lr-result-panel" id="resultPanel" style="display:none"></div>
+  </div>
+
+</form>
+
+<script src="live_report.js"></script>
+</body>
+</html>

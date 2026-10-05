@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "crime-webapp",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["dev_server.py", "--host", "127.0.0.1", "--port", "8085"],
+      "port": 8085,
+      "url": "http://127.0.0.1:8085"
+    }
+  ]
+}

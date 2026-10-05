@@ -1,0 +1,16 @@
+# Local, machine-specific Claude Code settings
+.claude/settings.local.json
+
+# Runtime-submitted live reports (may contain uploaded media / personal data)
+reports/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Redundant design archive (the PNG mockups are committed individually)
+design/*.zip

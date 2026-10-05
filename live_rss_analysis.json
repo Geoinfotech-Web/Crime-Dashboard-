@@ -1,0 +1,107 @@
+{
+  "refreshedAt": "2026-05-25T09:00:00Z",
+  "reportCount": 8,
+  "sourceCount": 5,
+  "topSource": {
+    "Name": "The Guardian Nigeria",
+    "Count": 3
+  },
+  "topKeyword": {
+    "Name": "kidnap",
+    "Count": 5
+  },
+  "topLocation": {
+    "Name": "Nigeria",
+    "Count": 5
+  },
+  "sources": [
+    {
+      "Name": "The Guardian Nigeria",
+      "Count": 3
+    },
+    {
+      "Name": "Channels TV",
+      "Count": 2
+    },
+    {
+      "Name": "AP News",
+      "Count": 1
+    },
+    {
+      "Name": "Premium Times Nigeria",
+      "Count": 1
+    },
+    {
+      "Name": "HumAngle",
+      "Count": 1
+    }
+  ],
+  "keywords": [
+    {
+      "Name": "kidnap",
+      "Count": 5
+    },
+    {
+      "Name": "abduct",
+      "Count": 4
+    },
+    {
+      "Name": "security",
+      "Count": 3
+    },
+    {
+      "Name": "Boko Haram",
+      "Count": 3
+    },
+    {
+      "Name": "ISWAP",
+      "Count": 2
+    },
+    {
+      "Name": "terror",
+      "Count": 2
+    },
+    {
+      "Name": "rescue",
+      "Count": 2
+    },
+    {
+      "Name": "ransom",
+      "Count": 1
+    },
+    {
+      "Name": "JAS",
+      "Count": 1
+    },
+    {
+      "Name": "militants",
+      "Count": 1
+    }
+  ],
+  "locations": [
+    {
+      "Name": "Nigeria",
+      "Count": 5
+    },
+    {
+      "Name": "Borno",
+      "Count": 4
+    },
+    {
+      "Name": "Oyo",
+      "Count": 3
+    },
+    {
+      "Name": "Katsina",
+      "Count": 1
+    },
+    {
+      "Name": "Edo",
+      "Count": 1
+    },
+    {
+      "Name": "Lagos",
+      "Count": 1
+    }
+  ]
+}
