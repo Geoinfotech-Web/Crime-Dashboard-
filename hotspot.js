@@ -40,6 +40,37 @@ const HS_REPORT_WEIGHT = { Low: 0.5, Medium: 1, High: 1.5, Critical: 2 };
 const HS_REPORT_WINDOW_DAYS = 30;
 const HS_NIGERIA_BOUNDS = [[4.2, 2.7], [13.9, 14.7]];
 
+// The density surface runs green (low) through amber to red (critical), the
+// same colours the risk levels use everywhere else on the page.
+const HS_RAMP = [
+  [0, '#35d08a'], [40, '#e3b341'], [60, '#f5a623'], [75, '#ff7a45'], [90, '#ff5a5f'], [100, '#ff5a5f']
+];
+// Kernel density surface: every state is a Gaussian bump as tall as its score.
+// A point takes the tallest bump over it rather than their sum, so a cluster
+// of small moderate states never reads hotter than any one of them scores.
+const HS_KERNEL_DEG = 0.75;                       // bandwidth, in degrees of latitude
+const HS_DENSITY_BOUNDS = [[3.2, 1.7], [14.9, 15.7]];
+const HS_DENSITY_WIDTH = 300;                     // grid cells across; height follows
+// The kinds of outlet the state news is gathered from.
+const HS_MEDIUM = {
+  radio: ['ti-radio', 'Radio'], tv: ['ti-device-tv', 'TV'], newspaper: ['ti-news', 'Newspaper'],
+  magazine: ['ti-book-2', 'Magazine'], wire: ['ti-building-broadcast-tower', 'News agency'], online: ['ti-world', 'Online']
+};
+const HS_PANEL_TABS = [
+  ['risk', 'ti-chart-bar', 'Risk'], ['actors', 'ti-users', 'Actors'], ['trend', 'ti-chart-line', 'Trend'],
+  ['live', 'ti-broadcast', 'Live signals'], ['ranking', 'ti-list-numbers', 'Ranking']
+];
+
+const HS_ZONES = {
+  'North-East': ['Adamawa', 'Bauchi', 'Borno', 'Gombe', 'Taraba', 'Yobe'],
+  'North-West': ['Jigawa', 'Kaduna', 'Kano', 'Katsina', 'Kebbi', 'Sokoto', 'Zamfara'],
+  'North-Central': ['Benue', 'FCT (Abuja)', 'Kogi', 'Kwara', 'Nasarawa', 'Niger', 'Plateau'],
+  'South-West': ['Ekiti', 'Lagos', 'Ogun', 'Ondo', 'Osun', 'Oyo'],
+  'South-East': ['Abia', 'Anambra', 'Ebonyi', 'Enugu', 'Imo'],
+  'South-South': ['Akwa Ibom', 'Bayelsa', 'Cross River', 'Delta', 'Edo', 'Rivers']
+};
+const HS_LIVE_PAGE = 5;
+
 const HS_ACTORS = [
   ['nsag', 'Non-state armed'], ['criminal', 'Criminal / bandit'],
   ['state', 'State / other'], ['unknown', 'Unknown']
@@ -53,7 +84,19 @@ const hsState = {
   updatedAt: null,      // when the index was last recalculated
   live: null,           // summary of the live signals used
   layers: null,
-  stampTimer: null
+  tiles: null,          // basemap + label layers, and the theme they were built for
+  stampTimer: null,
+  liveSel: null,        // live-signals picker: a state name, 'all' or 'national'
+  livePage: 0,
+  liveQuery: '',
+  rankMode: 'level',    // ranking grouped by 'level' or 'zone'
+  rankOpen: null,       // names of the expanded ranking groups
+  rankQuery: '',
+  panelTab: 'risk',     // tab showing in the panel beside the map
+  lastTab: 'risk',      // where to go back to when a state is closed
+  stateNews: new Map(), // state → { status, data, error }: local and regional reports
+  openState: null,      // state shown in the panel beside the map
+  stateTab: 'news'
 };
 
 function hsLevel(score) {
@@ -65,6 +108,30 @@ function hsLabel(score) { return hsLevel(score).label; }
 
 function hsShortName(stateName) {
   return stateName === 'FCT (Abuja)' ? 'Abuja' : stateName;
+}
+
+function hsZoneOf(stateName) {
+  return Object.keys(HS_ZONES).find(zone => HS_ZONES[zone].includes(stateName)) || 'Unassigned';
+}
+
+function hsRampRgb(score) {
+  const value = Math.max(0, Math.min(100, score));
+  const channels = hex => [0, 1, 2].map(i => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16));
+  const upper = HS_RAMP.findIndex(([stop]) => stop >= value);
+  if (upper <= 0) return channels(HS_RAMP[0][1]);
+  const [fromStop, fromHex] = HS_RAMP[upper - 1];
+  const [toStop, toHex] = HS_RAMP[upper];
+  const ratio = (value - fromStop) / (toStop - fromStop);
+  const from = channels(fromHex), to = channels(toHex);
+  return from.map((channel, i) => Math.round(channel + (to[i] - channel) * ratio));
+}
+
+function hsRampColor(score) {
+  return `rgb(${hsRampRgb(score).join(',')})`;
+}
+
+function hsIsLight() {
+  return document.documentElement.getAttribute('data-theme') === 'light';
 }
 
 // ── Inputs ───────────────────────────────────────────────────
@@ -232,6 +299,7 @@ function computeHotspots() {
       liveReports: signals.reports,
       liveCount: signals.articles.length + signals.reports.length,
       actors,
+      parts,
       rawScore: raw(weights),
       rawBaseline: raw(HS_WEIGHTS_DB)
     };
@@ -243,6 +311,10 @@ function computeHotspots() {
   rows.forEach(row => {
     row.composite = Math.round((row.rawScore / topRaw) * 100);
     row.baseline = Math.round((row.rawBaseline / topBaseline) * 100);
+    // Points each input adds to the composite; they sum to the score.
+    row.points = Object.fromEntries(Object.keys(weights).map(key =>
+      [key, (row.parts[key] * weights[key] / topRaw) * 100]));
+    row.zone = hsZoneOf(row.state);
   });
 
   const baselineOrder = [...rows].sort((a, b) => b.rawBaseline - a.rawBaseline).map(r => r.state);
@@ -292,6 +364,8 @@ function hsRecalculate(force) {
   renderHsCharts(cachedHotspots);
   renderHsLive(cachedHotspots);
   renderHsTable(cachedHotspots);
+  renderHsPanelTabs();
+  if (hsState.openState) hsRenderStatePanel();
 }
 
 // Theme changes only affect what is drawn on canvas; the rest is CSS.
@@ -299,6 +373,7 @@ function refreshHotspotTheme() {
   if (!hotspotInitialized || !cachedHotspots) return;
   renderHsMap(cachedHotspots);
   renderHsTrendChart(cachedHotspots);
+  if (hsState.openState) hsRenderStatePanel();
 }
 
 // ── Formula bar ──────────────────────────────────────────────
@@ -345,7 +420,7 @@ function hsLiveLine(state) {
 function renderHsKPIs(hotspots) {
   document.getElementById('hsTopStates').innerHTML = hotspots.slice(0, 5).map(s => {
     const level = hsLevel(s.composite);
-    return `<button type="button" class="hs-kpi-card hs-lv-${level.key}" onclick="hsFocusState('${escapeHtml(s.state)}')">
+    return `<button type="button" class="hs-kpi-card hs-lv-${level.key}" onclick="hsOpenState('${escapeHtml(s.state)}')">
       <div class="hs-kpi-rank">#${s.rank} &middot; ${level.label}</div>
       <div class="hs-kpi-state">${escapeHtml(s.state)}</div>
       <div class="hs-kpi-score">${s.composite}<span class="hs-kpi-max">/100</span></div>
@@ -361,88 +436,160 @@ function renderHsKPIs(hotspots) {
 
 // ── Map ──────────────────────────────────────────────────────
 
-function hsPopupHtml(s) {
+// States are outlines only: the colour comes from the density surface below.
+function hsMapStyle(s, selected) {
+  const light = hsIsLight();
+  if (!s) return { color: 'transparent', weight: 0, fillOpacity: 0 };
+  return {
+    color: selected ? (light ? '#0d2647' : '#ffffff') : (light ? 'rgba(13,38,71,0.3)' : 'rgba(255,255,255,0.2)'),
+    weight: selected ? 2.5 : 0.8,
+    fillColor: light ? '#0d2647' : '#ffffff',
+    fillOpacity: selected ? 0.1 : 0
+  };
+}
+
+// Kernel density surface of risk, drawn once as an image and stretched over
+// the map: each cell takes the tallest state bump at that point.
+function hsDensityImage(hotspots) {
+  const [[south, west], [north, east]] = HS_DENSITY_BOUNDS;
+  const width = HS_DENSITY_WIDTH;
+  const height = Math.round(width * (north - south) / (east - west));
+  const surface = document.createElement('canvas');
+  surface.width = width;
+  surface.height = height;
+  const pixels = surface.getContext('2d').createImageData(width, height);
+  const spread = 2 * HS_KERNEL_DEG * HS_KERNEL_DEG;
+  for (let y = 0; y < height; y++) {
+    const lat = north - (y + 0.5) / height * (north - south);
+    const squeeze = Math.cos(lat * Math.PI / 180);
+    for (let x = 0; x < width; x++) {
+      const lng = west + (x + 0.5) / width * (east - west);
+      let density = 0;
+      for (const s of hotspots) {
+        const dLat = lat - s.lat, dLng = (lng - s.lng) * squeeze;
+        density = Math.max(density, s.composite * Math.exp(-(dLat * dLat + dLng * dLng) / spread));
+      }
+      const [r, g, b] = hsRampRgb(density);
+      const at = (y * width + x) * 4;
+      pixels.data[at] = r; pixels.data[at + 1] = g; pixels.data[at + 2] = b;
+      // Faint where there is little risk, solid where it piles up.
+      pixels.data[at + 3] = Math.round(Math.min(1, Math.max(0, (density - 3) / 45)) ** 0.8 * 215);
+    }
+  }
+  surface.getContext('2d').putImageData(pixels, 0, 0);
+  if (!hsState.geo) return surface.toDataURL();
+
+  // Keep the surface inside Nigeria.
+  const clipped = document.createElement('canvas');
+  clipped.width = width;
+  clipped.height = height;
+  const ctx = clipped.getContext('2d');
+  ctx.beginPath();
+  hsState.geo.features.forEach(feature => {
+    const geometry = feature.geometry;
+    (geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates).forEach(rings => {
+      rings[0].forEach(([lng, lat], i) => {
+        const x = (lng - west) / (east - west) * width, y = (north - lat) / (north - south) * height;
+        if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      });
+      ctx.closePath();
+    });
+  });
+  ctx.clip();
+  ctx.drawImage(surface, 0, 0);
+  return clipped.toDataURL();
+}
+
+function hsTooltipHtml(s) {
   const level = hsLevel(s.composite);
-  const latest = s.liveArticles[0];
-  return `
-    <div class="popup-title">${escapeHtml(s.state)} &middot; #${s.rank}</div>
-    <div class="popup-row"><span>Composite risk</span><span style="color:${level.color};font-size:15px;font-weight:700">${s.composite}/100</span></div>
-    <div class="popup-row"><span>Level</span><span style="color:${level.color};font-weight:600">${level.label}</span></div>
-    <div class="popup-row"><span>Deaths</span><span class="popup-metric-danger">${s.deaths.toLocaleString()}</span></div>
-    <div class="popup-row"><span>Incidents</span><span>${s.incidents.toLocaleString()}</span></div>
-    <div class="popup-row"><span>Aid worker incidents</span><span>${s.awsdCount}</span></div>
-    <div class="popup-row"><span>Aid workers affected</span><span>${s.awsdAffected}</span></div>
-    <div class="popup-row"><span>Live signals</span><span>${s.liveArticles.length} news &middot; ${s.liveReports.length} citizen</span></div>
-    ${latest ? `<div class="popup-detail"><a href="${escapeHtml(latest.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(latest.title)}</a></div>` : ''}`;
+  return `<div class="hs-tip-name">${escapeHtml(s.state)}</div>
+    <div class="hs-tip-row"><span class="hs-tip-swatch" style="background:${hsRampColor(s.composite)}"></span>${s.composite}/100 &middot; ${level.label} &middot; #${s.rank}</div>
+    <div class="hs-tip-hint">Click to load its analysis</div>`;
+}
+
+// Same keyless Esri canvas the dashboard and Travel Safety use, with the
+// place-name layer drawn above the risk shading so towns stay readable.
+function hsSyncBasemap(map) {
+  const theme = hsIsLight() ? 'light' : 'dark';
+  if (hsState.tiles?.theme === theme) return;
+  if (hsState.tiles) { hsState.tiles.base.remove(); hsState.tiles.labels.remove(); }
+  const labelsUrl = (theme === 'light' ? LIGHT_TILE : DARK_TILE).replace('_Base/', '_Reference/');
+  hsState.tiles = {
+    theme,
+    base: L.tileLayer(theme === 'light' ? LIGHT_TILE : DARK_TILE, TILE_OPTS).addTo(map),
+    labels: L.tileLayer(labelsUrl, { maxZoom: 16, pane: 'hsLabels' }).addTo(map)
+  };
 }
 
 function renderHsMap(hotspots) {
   const firstDraw = !hotspotMapInstance;
   if (firstDraw) {
     hotspotMapInstance = L.map('hotspotMap', {
-      zoomControl: true, attributionControl: false,
-      zoomSnap: 0.25, minZoom: 5, maxZoom: 9
+      zoomControl: true, attributionControl: true,
+      zoomSnap: 0.25, minZoom: 5, maxZoom: 12
     }).setView([9.05, 8.7], 6);
+    const labels = hotspotMapInstance.createPane('hsLabels');
+    labels.style.zIndex = 450;
+    labels.style.pointerEvents = 'none';
+    const density = hotspotMapInstance.createPane('hsDensity');
+    density.style.zIndex = 350;                   // above the basemap, below the state outlines
+    density.style.pointerEvents = 'none';
+    document.getElementById('hsLegendBar').style.background =
+      `linear-gradient(90deg,${HS_RAMP.map(([stop, hex]) => `${hex} ${stop}%`).join(',')})`;
   }
   const map = hotspotMapInstance;
+  hsSyncBasemap(map);
   if (hsState.layers) hsState.layers.remove();
   hsState.layers = L.layerGroup().addTo(map);
   hsState.polygons = new Map();
 
   const byName = new Map(hotspots.map(s => [s.state, s]));
-  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-  const outline = isLight ? 'rgba(13,38,71,0.35)' : 'rgba(255,255,255,0.16)';
+  const openProfile = s => () => hsOpenState(s.state);
 
-  // Boundaries, tinted by score. Until they load the glow markers stand alone.
-  if (hsState.geo) {
-    L.geoJSON(hsState.geo, {
-      style: feature => {
-        const s = byName.get(hsGeoStateName(feature));
-        return {
-          color: outline, weight: 0.8,
-          fillColor: s ? hsColor(s.composite) : 'transparent',
-          fillOpacity: s ? 0.05 + (s.composite / 100) * 0.17 : 0
-        };
-      },
-      onEachFeature: (feature, layer) => {
-        const s = byName.get(hsGeoStateName(feature));
-        if (!s) return;
-        hsState.polygons.set(s.state, layer);
-        layer.bindPopup(hsPopupHtml(s));
-        layer.on({
-          mouseover: e => e.target.setStyle({ weight: 1.8, color: isLight ? '#0d2647' : '#ffffff' }),
-          mouseout:  e => e.target.setStyle({ weight: 0.8, color: outline })
-        });
-      }
-    }).addTo(hsState.layers);
-  }
-
-  // Glow: radius follows the score, so the eye lands on the worst first.
-  hotspots.forEach(s => {
-    const color = hsColor(s.composite);
-    const radius = 22000 + s.composite * 1150;
-    const strength = 0.12 + (s.composite / 100) * 0.4;
-    [[1, strength * 0.55], [0.5, strength]].forEach(([scale, opacity]) => {
-      L.circle([s.lat, s.lng], {
-        radius: radius * scale, stroke: false, fillColor: color, fillOpacity: opacity,
-        interactive: false, className: 'hs-blob'
-      }).addTo(hsState.layers);
-    });
-    if (!hsState.geo) {
-      L.circleMarker([s.lat, s.lng], { radius: 9, opacity: 0, fillOpacity: 0 })
-        .bindPopup(hsPopupHtml(s)).addTo(hsState.layers);
-    }
-  });
-
+  L.imageOverlay(hsDensityImage(hotspots), HS_DENSITY_BOUNDS, { pane: 'hsDensity', opacity: 0.9, className: 'hs-density' })
+    .addTo(hsState.layers);
   hotspots.slice(0, 6).forEach(s => {
     L.marker([s.lat, s.lng], {
-      interactive: false,
+      interactive: false, pane: 'hsLabels',
       icon: L.divIcon({
         className: 'hs-map-label-anchor', iconSize: [0, 0],
         html: `<span class="hs-map-label">${escapeHtml(hsShortName(s.state))} &middot; ${s.composite}</span>`
       })
     }).addTo(hsState.layers);
   });
+
+  if (hsState.geo) {
+    L.geoJSON(hsState.geo, {
+      style: feature => {
+        const s = byName.get(hsGeoStateName(feature));
+        return hsMapStyle(s, s && s.state === hsState.openState);
+      },
+      onEachFeature: (feature, layer) => {
+        const s = byName.get(hsGeoStateName(feature));
+        if (!s) return;
+        hsState.polygons.set(s.state, layer);
+        layer.bindTooltip(hsTooltipHtml(s), { sticky: true, direction: 'top', offset: [0, -6], className: 'hs-tip' });
+        layer.on({
+          mouseover: e => {
+            if (s.state === hsState.openState) return;
+            e.target.setStyle({ weight: 2, color: hsIsLight() ? '#0d2647' : '#ffffff', fillOpacity: 0.07 });
+            e.target.bringToFront();
+          },
+          mouseout: e => e.target.setStyle(hsMapStyle(s, s.state === hsState.openState)),
+          click: openProfile(s)
+        });
+      }
+    }).addTo(hsState.layers);
+  } else {
+    // Boundaries still loading (or unavailable): a marker per state stands in.
+    hotspots.forEach(s => {
+      L.circleMarker([s.lat, s.lng], {
+        radius: 7 + s.composite / 9, color: hsIsLight() ? '#ffffff' : '#0b1420', weight: 1,
+        fillColor: hsRampColor(s.composite), fillOpacity: 0.85
+      }).bindTooltip(hsTooltipHtml(s), { direction: 'top', className: 'hs-tip' })
+        .on('click', openProfile(s)).addTo(hsState.layers);
+    });
+  }
 
   // The panel has no size until the view is on screen, so frame Nigeria only
   // once it does — and only the first time, so a refresh never moves the map.
@@ -452,13 +599,24 @@ function renderHsMap(hotspots) {
   }, 150);
 }
 
-function hsFocusState(stateName) {
+function hsHighlightState(stateName) {
+  const previous = hsState.openState;
+  hsState.openState = stateName;
+  const byName = new Map((cachedHotspots || []).map(s => [s.state, s]));
+  [previous, stateName].forEach(name => {
+    const polygon = name && hsState.polygons?.get(name);
+    if (!polygon) return;
+    polygon.setStyle(hsMapStyle(byName.get(name), name === stateName));
+    if (name === stateName) polygon.bringToFront();
+  });
+}
+
+function hsLocateState(stateName) {
+  const polygon = hsState.polygons?.get(stateName);
   const s = (cachedHotspots || []).find(row => row.state === stateName);
   if (!s || !hotspotMapInstance) return;
-  document.getElementById('hotspotMap').scrollIntoView({ behavior: 'smooth', block: 'center' });
-  hotspotMapInstance.flyTo([s.lat, s.lng], 7, { duration: 0.8 });
-  const polygon = hsState.polygons?.get(stateName);
-  if (polygon) setTimeout(() => polygon.openPopup([s.lat, s.lng]), 850);
+  if (polygon) hotspotMapInstance.flyToBounds(polygon.getBounds(), { padding: [40, 40], duration: 0.8 });
+  else hotspotMapInstance.flyTo([s.lat, s.lng], 8, { duration: 0.8 });
 }
 
 // ── Right-hand analysis ──────────────────────────────────────
@@ -466,14 +624,21 @@ function hsFocusState(stateName) {
 function renderHsCharts(hotspots) {
   // ① Composite risk — top 10
   document.getElementById('hsRiskBars').innerHTML = hotspots.slice(0, 10).map(s => `
-    <div class="hs-bar-row" onclick="hsFocusState('${escapeHtml(s.state)}')">
+    <div class="hs-bar-row" onclick="hsOpenState('${escapeHtml(s.state)}')">
       <span class="hs-bar-name">${escapeHtml(hsShortName(s.state))}</span>
       <span class="hs-bar-track"><span class="hs-bar-fill" style="width:${s.composite}%"></span></span>
       <span class="hs-bar-val">${s.composite}</span>
     </div>`).join('');
 
-  // ② Who is behind it — top 5, from AWSD records and current headlines
-  document.getElementById('hsActorBars').innerHTML = hotspots.slice(0, 5).map(s => {
+  // How the 37 states split across the levels; a chip opens that group in the ranking.
+  document.getElementById('hsLevelStrip').innerHTML = HS_LEVELS.map(level => {
+    const count = hotspots.filter(s => hsLevel(s.composite) === level).length;
+    return `<button type="button" class="hs-level-chip hs-lv-${level.key}" ${count ? '' : 'disabled'} onclick="hsShowRankGroup('${level.label}')">
+      <strong>${count}</strong><span>${level.label}</span></button>`;
+  }).join('');
+
+  // ② Who is behind it — top 10, from AWSD records and current headlines
+  document.getElementById('hsActorBars').innerHTML = hotspots.slice(0, 10).map(s => {
     const total = HS_ACTORS.reduce((sum, [key]) => sum + (s.actors[key] || 0), 0);
     const segments = total
       ? HS_ACTORS.filter(([key]) => s.actors[key]).map(([key, label]) =>
@@ -493,6 +658,7 @@ function renderHsCharts(hotspots) {
 
 // ③ Aid-worker incidents by year — top 3
 function renderHsTrendChart(hotspots) {
+  if (hsState.panelTab !== 'trend') return;       // drawn when its tab is opened
   const { tc, gc } = getChartThemeColors();
   const years = [...new Set(awsdData.map(r => r.year))].sort((a, b) => a - b);
   const palette = ['#ff5a5f', '#f5a623', '#2e8fff'];
@@ -525,7 +691,131 @@ function renderHsTrendChart(hotspots) {
   });
 }
 
+// ── State, local-government and community news ──────────────
+// Gathered per state, on demand, from the outlets in regional_sources.json
+// (radio, newspapers, magazines, TV, news agencies) plus searches for the
+// state, its local governments and its towns — see route_news.py.
+
+function hsStateNewsEntry(stateName) {
+  return hsState.stateNews.get(stateName) || { status: 'idle', data: null, error: '' };
+}
+
+async function hsLoadStateNews(stateName, force) {
+  const entry = hsStateNewsEntry(stateName);
+  if (entry.status === 'loading' || (!force && entry.status === 'ready')) return;
+  hsState.stateNews.set(stateName, { status: 'loading', data: entry.data, error: '' });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+  try {
+    const params = new URLSearchParams({ states: stateName, local: '1' });
+    const response = await fetch(`/api/route-news?${params}`, { cache: 'no-store', signal: controller.signal });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `Server returned ${response.status}`);
+    hsState.stateNews.set(stateName, { status: 'ready', data, error: '' });
+  } catch (error) {
+    hsState.stateNews.set(stateName, { status: 'error', data: null,
+      error: error.name === 'AbortError' ? 'The news sources took too long to answer.' : error.message });
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (hsState.openState === stateName) hsRenderStatePanel();
+  if (hsState.panelTab === 'live') renderHsLive(cachedHotspots);
+}
+
+function hsAgo(hours) {
+  if (hours == null) return 'undated';
+  if (hours < 1) return 'under an hour ago';
+  if (hours < 24) return `${Math.round(hours)}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+function hsMediaIcons(media) {
+  return (media || []).filter(key => HS_MEDIUM[key]).map(key =>
+    `<i class="ti ${HS_MEDIUM[key][0]}" title="${HS_MEDIUM[key][1]}"></i>`).join('');
+}
+
+function hsLocalItemHtml(event) {
+  const places = event.places.map(place => `<span class="hs-live-attack hs-live-place"><i class="ti ti-map-pin"></i> ${escapeHtml(place)}</span>`).join('');
+  const more = event.sourceCount > 1 ? ` &middot; +${event.sourceCount - 1} more outlet${event.sourceCount === 2 ? '' : 's'}` : '';
+  return `<a class="hs-live-item" href="${escapeHtml(event.url)}" target="_blank" rel="noopener noreferrer">
+    <div class="hs-live-tags"><span class="hs-live-attack hs-cat-${escapeHtml(event.category)}">${escapeHtml(event.categoryLabel)}</span>${places}
+      ${event.regionalSources.length ? '<span class="hs-live-attack hs-live-regional">Local outlet</span>' : ''}</div>
+    <div class="hs-live-title">${escapeHtml(event.title)}</div>
+    <div class="hs-live-meta"><span class="hs-media">${hsMediaIcons(event.media)}</span> ${escapeHtml(event.source)}${more} &middot; ${hsAgo(event.ageHours)} <i class="ti ti-external-link"></i></div>
+  </a>`;
+}
+
+// One line saying where a state's news came from, or that it is on its way.
+function hsStateNewsNote(stateName) {
+  const entry = hsStateNewsEntry(stateName);
+  if (entry.data) {
+    const sources = entry.data.sources;
+    const kinds = Object.entries(sources.byMedium || {}).sort((a, b) => b[1] - a[1])
+      .map(([key, count]) => `${count} ${(HS_MEDIUM[key]?.[1] || key).toLowerCase()}`).join(' · ');
+    return `<div class="hs-news-note"><i class="ti ti-rss"></i> Last ${entry.data.windowDays} days · ${sources.answered} of ${sources.checked} sources answered${kinds ? ` (${kinds})` : ''} · ${sources.regionalAnswered} local to ${escapeHtml(stateName)}
+      <button type="button" class="tv-inline-btn" onclick="hsLoadStateNews('${escapeHtml(stateName)}', true)">Refresh</button></div>`;
+  }
+  if (entry.status === 'error') {
+    return `<div class="hs-news-note is-warn"><i class="ti ti-alert-triangle"></i> Local sources could not be read: ${escapeHtml(entry.error)} Showing the last 24 hours from the national feed.
+      <button type="button" class="tv-inline-btn" onclick="hsLoadStateNews('${escapeHtml(stateName)}', true)">Try again</button></div>`;
+  }
+  return '<div class="hs-news-note"><i class="ti ti-loader-2 tv-spin"></i> Reading state, local-government and community sources… showing the last 24 hours meanwhile.</div>';
+}
+
 // ── Live signals ─────────────────────────────────────────────
+
+// Reports for one row of the picker, newest first. Citizen reports and news
+// share a shape so one list can show both.
+function hsLiveItems(hotspots, selection) {
+  const byUrl = new Map();
+  hotspots.forEach(s => s.liveArticles.forEach(article => {
+    if (!byUrl.has(article.url)) byUrl.set(article.url, { kind: 'news', article, states: [] });
+    byUrl.get(article.url).states.push(s);
+  }));
+  const citizen = hotspots.flatMap(s => s.liveReports.map(report => ({ kind: 'citizen', report, states: [s] })));
+
+  let items;
+  if (selection === 'national') {
+    items = liveArticles.filter(article => !byUrl.has(article.url))
+      .map(article => ({ kind: 'news', article: { ...article, attack: classifyLiveAttack(article) }, states: [] }));
+  } else {
+    items = [...byUrl.values(), ...citizen];
+    if (selection !== 'all') items = items.filter(item => item.states.some(s => s.state === selection));
+  }
+  const when = item => Date.parse(item.kind === 'news' ? item.article.seenDate : item.report.receivedAt) || 0;
+  return items.sort((a, b) => when(b) - when(a));
+}
+
+function hsLiveItemHtml(item, showStates) {
+  const tags = showStates ? item.states.map(s =>
+    `<span class="hs-live-state hs-lv-${hsLevel(s.composite).key}">${escapeHtml(hsShortName(s.state))} &middot; ${s.composite}</span>`).join('') : '';
+  if (item.kind === 'local') return hsLocalItemHtml(item.event);
+  if (item.kind === 'citizen') {
+    const report = item.report;
+    return `<div class="hs-live-item">
+      <div class="hs-live-tags">${tags}<span class="hs-live-attack hs-live-citizen"><i class="ti ti-user-exclamation"></i> Citizen report</span>
+        <span class="hs-live-attack">${escapeHtml(report.category || 'Other')} &middot; ${escapeHtml(report.severity || 'Unknown')}</span></div>
+      <div class="hs-live-title">${escapeHtml(report.message || 'No description given')}</div>
+      <div class="hs-live-meta">Submitted through Live Report &middot; ${escapeHtml(formatNewsDate(report.receivedAt))}</div>
+    </div>`;
+  }
+  const article = item.article;
+  return `<a class="hs-live-item" href="${escapeHtml(article.url)}" target="_blank" rel="noopener noreferrer">
+    <div class="hs-live-tags">${tags}<span class="hs-live-attack">${escapeHtml(article.attack)}</span></div>
+    <div class="hs-live-title">${escapeHtml(article.title)}</div>
+    <div class="hs-live-meta">${escapeHtml(article.domain)} &middot; ${escapeHtml(formatNewsDate(article.seenDate))} <i class="ti ti-external-link"></i></div>
+  </a>`;
+}
+
+function hsPagerHtml(page, pages, total, handler) {
+  if (pages <= 1) return total ? `<span class="hs-pager-info">${total} report${total === 1 ? '' : 's'}</span>` : '';
+  return `<span class="hs-pager-info">Page ${page + 1} of ${pages} &middot; ${total} reports</span>
+    <span class="hs-pager-btns">
+      <button type="button" class="hs-tool-btn" ${page === 0 ? 'disabled' : ''} onclick="${handler}(${page - 1})"><i class="ti ti-chevron-left"></i> Newer</button>
+      <button type="button" class="hs-tool-btn" ${page >= pages - 1 ? 'disabled' : ''} onclick="${handler}(${page + 1})">Older <i class="ti ti-chevron-right"></i></button>
+    </span>`;
+}
 
 function renderHsLive(hotspots) {
   const live = hsState.live;
@@ -538,32 +828,86 @@ function renderHsLive(hotspots) {
     `<span class="hs-live-mode is-${mode}"><span class="hs-live-dot"></span>${modeLabel}</span>
      ${live.articles} news report${live.articles === 1 ? '' : 's'} in the last 24h &middot; ${live.mappedArticles} tied to a state &middot; ${reportsText}`;
 
-  // One row per article, however many states it names.
-  const seen = new Map();
-  hotspots.forEach(s => s.liveArticles.forEach(article => {
-    if (!seen.has(article.url)) seen.set(article.url, { article, states: [] });
-    seen.get(article.url).states.push(s);
-  }));
-  const items = [...seen.values()]
-    .sort((a, b) => (Date.parse(b.article.seenDate) || 0) - (Date.parse(a.article.seenDate) || 0))
-    .slice(0, 12);
+  const withSignals = hotspots.filter(s => s.liveCount).sort((a, b) => b.liveCount - a.liveCount || a.rank - b.rank);
+  const valid = ['all', 'national', ...hotspots.map(s => s.state)];
+  // Until a row is picked, follow the state with the most current reports.
+  const selection = valid.includes(hsState.liveSel) ? hsState.liveSel : (withSignals[0]?.state || 'all');
 
-  const list = document.getElementById('hsLiveList');
-  if (!items.length) {
-    list.innerHTML = `<div class="hs-live-empty">${live.articles
-      ? 'None of the current reports names a Nigerian state, so the index is running on the database alone.'
-      : 'No current reports yet. The index is running on the database alone and will pick up the feed when it responds.'}</div>`;
-    return;
+  // Picker: states with something current first, then the rest by rank.
+  const query = hsState.liveQuery.trim().toLowerCase();
+  const states = [...withSignals, ...hotspots.filter(s => !s.liveCount)]
+    .filter(s => !query || s.state.toLowerCase().includes(query));
+  const unlocated = live.articles - live.mappedArticles;
+  const pickRow = (key, name, sub, news, citizen, levelKey) => `
+    <tr class="${levelKey ? `hs-lv-${levelKey}` : ''}${selection === key ? ' is-selected' : ''}${news + citizen ? '' : ' is-quiet'}"
+        onclick="hsSelectLive('${escapeHtml(key)}')">
+      <td><span class="hs-pick-name">${name}</span>${sub}</td>
+      <td class="hs-num">${news || '<span class="hs-muted">0</span>'}</td>
+      <td class="hs-num">${citizen || '<span class="hs-muted">0</span>'}</td>
+    </tr>`;
+  document.getElementById('hsLivePicker').innerHTML = `
+    <thead><tr><th>State</th><th class="hs-num">News</th><th class="hs-num">Citizen</th></tr></thead>
+    <tbody>
+      ${query ? '' : pickRow('all', 'All states', '<span class="hs-pick-sub">Everything tied to a state</span>', live.mappedArticles, live.mappedReports, '')}
+      ${states.map(s => pickRow(s.state, escapeHtml(s.state),
+        `<span class="hs-badge">${s.composite} &middot; ${hsLevel(s.composite).label}</span>`,
+        s.liveArticles.length, s.liveReports.length, hsLevel(s.composite).key)).join('')}
+      ${query ? '' : pickRow('national', 'Not tied to a state', '<span class="hs-pick-sub">Nationwide or unlocated</span>', unlocated, 0, '')}
+      ${states.length || !query ? '' : '<tr class="hs-pick-none"><td colspan="3">No state matches.</td></tr>'}
+    </tbody>`;
+
+  // Reports for the chosen row.
+  const selected = hotspots.find(s => s.state === selection);
+  let items = hsLiveItems(hotspots, selection);
+  // A state on its own gets its local and regional reports for the week,
+  // fetched the first time it is looked at.
+  let newsNote = '';
+  if (selected && hsState.panelTab === 'live') {
+    if (hsStateNewsEntry(selected.state).status === 'idle') hsLoadStateNews(selected.state);
+    const local = hsStateNewsEntry(selected.state).data;
+    if (local) items = local.events.map(event => ({ kind: 'local', event, states: [selected] }));
+    newsNote = hsStateNewsNote(selected.state);
   }
-  list.innerHTML = items.map(({ article, states }) => `
-    <a class="hs-live-item" href="${escapeHtml(article.url)}" target="_blank" rel="noopener noreferrer">
-      <div class="hs-live-tags">
-        ${states.map(s => `<span class="hs-live-state hs-lv-${hsLevel(s.composite).key}">${escapeHtml(hsShortName(s.state))} &middot; ${s.composite}</span>`).join('')}
-        <span class="hs-live-attack">${escapeHtml(article.attack)}</span>
-      </div>
-      <div class="hs-live-title">${escapeHtml(article.title)}</div>
-      <div class="hs-live-meta">${escapeHtml(article.domain)} &middot; ${escapeHtml(formatNewsDate(article.seenDate))}</div>
-    </a>`).join('');
+  const pages = Math.max(1, Math.ceil(items.length / HS_LIVE_PAGE));
+  hsState.livePage = Math.min(Math.max(hsState.livePage, 0), pages - 1);
+  const pageItems = items.slice(hsState.livePage * HS_LIVE_PAGE, (hsState.livePage + 1) * HS_LIVE_PAGE);
+
+  const title = selected ? escapeHtml(selected.state)
+    : selection === 'national' ? 'Not tied to a state' : 'All states';
+  const sub = selected
+    ? `<span class="hs-badge hs-lv-${hsLevel(selected.composite).key}">${selected.composite}/100 &middot; ${hsLevel(selected.composite).label}</span>
+       <span class="hs-muted">Rank #${selected.rank} &middot; ${escapeHtml(selected.zone)}</span>`
+    : `<span class="hs-muted">${selection === 'national'
+        ? 'Reports that name no Nigerian state; they do not move any state score'
+        : 'Every current report that names a state'}</span>`;
+  document.getElementById('hsLiveDetailHead').innerHTML = `
+    <div class="hs-live-detail-title"><strong>${title}</strong>${sub}</div>
+    ${selected ? `<button type="button" class="hs-tool-btn" onclick="hsOpenState('${escapeHtml(selected.state)}')"><i class="ti ti-layout-sidebar-right-expand"></i> State profile</button>` : ''}`;
+
+  let empty = 'No current reports yet. The index is running on the database alone and will pick up the feed when it responds.';
+  if (selected) empty = hsStateNewsEntry(selected.state).data
+    ? `No incident reports were found for ${escapeHtml(selected.state)} in the last ${hsStateNewsEntry(selected.state).data.windowDays} days.`
+    : `No current news or citizen reports name ${escapeHtml(selected.state)}. Its score rests on the incident database.`;
+  else if (selection === 'national') empty = 'Every current report names a state.';
+  else if (live.articles) empty = 'None of the current reports names a Nigerian state, so the index is running on the database alone.';
+  document.getElementById('hsLiveList').innerHTML = newsNote + (pageItems.length
+    ? pageItems.map(item => hsLiveItemHtml(item, !selected)).join('')
+    : `<div class="hs-live-empty">${empty}</div>`);
+  document.getElementById('hsLivePager').innerHTML = hsPagerHtml(hsState.livePage, pages, items.length, 'hsSetLivePage');
+}
+
+function hsSelectLive(key) {
+  hsState.liveSel = key;
+  hsState.livePage = 0;
+  renderHsLive(cachedHotspots);
+}
+function hsSetLivePage(page) {
+  hsState.livePage = page;
+  renderHsLive(cachedHotspots);
+}
+function hsSetLiveQuery(value) {
+  hsState.liveQuery = value;
+  renderHsLive(cachedHotspots);
 }
 
 // ── Full ranking ─────────────────────────────────────────────
@@ -574,64 +918,441 @@ function hsShiftHtml(shift) {
   return '<span class="hs-shift">&ndash;</span>';
 }
 
+// The 37 states split into a handful of groups, each of which opens on click.
+function hsRankGroups(hotspots) {
+  if (hsState.rankMode === 'zone') {
+    return Object.keys(HS_ZONES)
+      .map(zone => ({ name: zone, rows: hotspots.filter(s => s.zone === zone) }))
+      .filter(group => group.rows.length)
+      .map(group => ({ ...group, note: `Highest: ${hsShortName(group.rows[0].state)} ${group.rows[0].composite}` }))
+      .sort((a, b) => b.rows[0].composite - a.rows[0].composite);
+  }
+  return HS_LEVELS.map((level, index) => ({
+    name: level.label,
+    levelKey: level.key,
+    note: `Score ${level.min}–${index ? HS_LEVELS[index - 1].min - 1 : 100}`,
+    rows: hotspots.filter(s => hsLevel(s.composite) === level)
+  })).filter(group => group.rows.length);
+}
+
 function renderHsTable(hotspots) {
+  const query = hsState.rankQuery.trim().toLowerCase();
+  const allGroups = hsRankGroups(hotspots);
+  if (!hsState.rankOpen) hsState.rankOpen = new Set(allGroups.slice(0, 1).map(group => group.name));
+  const groups = allGroups
+    .map(group => ({ ...group, shown: query ? group.rows.filter(s => s.state.toLowerCase().includes(query)) : group.rows }))
+    .filter(group => group.shown.length);
+  const sum = (rows, pick) => rows.reduce((total, s) => total + pick(s), 0);
+
+  document.querySelectorAll('[data-rank-mode]').forEach(button =>
+    button.classList.toggle('is-active', button.dataset.rankMode === hsState.rankMode));
+  const allOpen = allGroups.every(group => hsState.rankOpen.has(group.name));
+  document.getElementById('hsRankToggleAll').innerHTML = allOpen
+    ? '<i class="ti ti-fold"></i> Collapse all' : '<i class="ti ti-unfold"></i> Expand all';
+
+  const stateRow = s => {
+    const level = hsLevel(s.composite);
+    return `<tr class="hs-row hs-lv-${level.key}" onclick="hsOpenState('${escapeHtml(s.state)}')">
+      <td class="hs-td-rank">${s.rank}</td>
+      <td class="hs-td-state">${escapeHtml(s.state)}</td>
+      <td><div class="hs-score-bar" title="${level.label}">
+        <span class="hs-score-val">${s.composite}</span>
+        <div class="hs-score-track"><div class="hs-score-fill" style="width:${s.composite}%"></div></div>
+      </div></td>
+      <td class="hs-td-deaths">${s.deaths.toLocaleString()}</td>
+      <td>${s.incidents.toLocaleString()}</td>
+      <td>${s.awsdCount}</td>
+      <td>${s.liveCount || '<span class="hs-muted">0</span>'}</td>
+      <td>${hsShiftHtml(s.rankShift)}</td>
+    </tr>`;
+  };
+
+  const groupBody = group => {
+    const open = query ? true : hsState.rankOpen.has(group.name);
+    const rows = group.shown;
+    const average = Math.round(sum(rows, s => s.composite) / rows.length);
+    const levelKey = group.levelKey || hsLevel(average).key;
+    return `<tbody class="hs-grp hs-lv-${levelKey}${open ? ' is-open' : ''}">
+      <tr class="hs-grp-row" onclick="hsToggleRankGroup('${escapeHtml(group.name)}')" aria-expanded="${open}">
+        <td><i class="ti ti-chevron-right hs-grp-chev"></i></td>
+        <td><span class="hs-grp-name"><span class="hs-grp-dot"></span>${escapeHtml(group.name)}</span>
+            <span class="hs-grp-note">${rows.length} state${rows.length === 1 ? '' : 's'} &middot; ${escapeHtml(group.note)}</span></td>
+        <td><div class="hs-score-bar">
+          <span class="hs-score-val" title="Average score">${average}</span>
+          <div class="hs-score-track"><div class="hs-score-fill" style="width:${average}%"></div></div>
+        </div></td>
+        <td class="hs-td-deaths">${sum(rows, s => s.deaths).toLocaleString()}</td>
+        <td>${sum(rows, s => s.incidents).toLocaleString()}</td>
+        <td>${sum(rows, s => s.awsdCount)}</td>
+        <td>${sum(rows, s => s.liveCount) || '<span class="hs-muted">0</span>'}</td>
+        <td></td>
+      </tr>
+      ${open ? rows.map(stateRow).join('') : ''}
+    </tbody>`;
+  };
+
   document.getElementById('hsRankTable').innerHTML = `
     <thead><tr>
-      <th>#</th><th>State</th><th style="min-width:180px">Risk score</th><th>Level</th>
-      <th>Deaths</th><th>Incidents</th><th>Aid incidents</th><th>Workers affected</th>
-      <th>Live signals</th><th title="Change in rank caused by live signals">Shift</th>
+      <th>#</th><th>${hsState.rankMode === 'zone' ? 'Zone / state' : 'Risk level / state'}</th>
+      <th style="min-width:104px">Risk score</th>
+      <th>Deaths</th><th>Incidents</th><th title="Aid worker incidents">Aid</th>
+      <th title="Live news and citizen reports">Live</th><th title="Change in rank caused by live signals">Shift</th>
     </tr></thead>
-    <tbody>
-      ${hotspots.map(s => {
-        const level = hsLevel(s.composite);
-        return `<tr class="hs-lv-${level.key}" onclick="hsFocusState('${escapeHtml(s.state)}')">
-          <td class="hs-td-rank">${s.rank}</td>
-          <td class="hs-td-state">${escapeHtml(s.state)}</td>
-          <td><div class="hs-score-bar">
-            <span class="hs-score-val">${s.composite}</span>
-            <div class="hs-score-track"><div class="hs-score-fill" style="width:${s.composite}%"></div></div>
-          </div></td>
-          <td><span class="hs-badge">${level.label}</span></td>
-          <td class="hs-td-deaths">${s.deaths.toLocaleString()}</td>
-          <td>${s.incidents.toLocaleString()}</td>
-          <td>${s.awsdCount}</td>
-          <td>${s.awsdAffected}</td>
-          <td>${s.liveCount || '<span class="hs-muted">0</span>'}</td>
-          <td>${hsShiftHtml(s.rankShift)}</td>
-        </tr>`;
-      }).join('')}
-    </tbody>`;
+    ${groups.map(groupBody).join('') || '<tbody><tr><td colspan="8" class="hs-rank-none">No state matches.</td></tr></tbody>'}`;
+}
+
+function hsSetRankMode(mode) {
+  if (mode === hsState.rankMode) return;
+  hsState.rankMode = mode;
+  hsState.rankOpen = null;
+  renderHsTable(cachedHotspots);
+}
+function hsSetRankQuery(value) {
+  hsState.rankQuery = value;
+  renderHsTable(cachedHotspots);
+}
+function hsToggleRankGroup(name) {
+  if (hsState.rankQuery.trim()) return;   // a search shows every match
+  if (!hsState.rankOpen.delete(name)) hsState.rankOpen.add(name);
+  renderHsTable(cachedHotspots);
+}
+function hsShowRankGroup(name) {
+  hsState.rankMode = 'level';
+  hsState.rankQuery = '';
+  document.getElementById('hsRankSearch').value = '';
+  hsState.rankOpen = new Set([name]);
+  renderHsTable(cachedHotspots);
+  hsSetPanelTab('ranking');
+}
+function hsToggleAllRankGroups() {
+  const names = hsRankGroups(cachedHotspots).map(group => group.name);
+  const allOpen = names.every(name => hsState.rankOpen.has(name));
+  hsState.rankOpen = new Set(allOpen ? [] : names);
+  renderHsTable(cachedHotspots);
+}
+
+// ── State profile ────────────────────────────────────────────
+
+// The panel beside the map is tabbed so the page does not have to scroll.
+// Clicking a state adds a tab for it and brings that tab forward.
+function renderHsPanelTabs() {
+  const signals = hsState.live ? hsState.live.mappedArticles + hsState.live.mappedReports : 0;
+  const tab = (key, icon, label, extra = '') => `<button type="button" role="tab" class="hs-tab hs-ptab${hsState.panelTab === key ? ' is-active' : ''}"
+    aria-selected="${hsState.panelTab === key}" onclick="hsSetPanelTab('${key}')"><i class="ti ${icon}"></i>${label}${extra}</button>`;
+  document.getElementById('hsPanelTabs').innerHTML =
+    HS_PANEL_TABS.map(([key, icon, label]) =>
+      tab(key, icon, label, key === 'live' && signals ? `<span class="hs-tab-count">${signals}</span>` : '')).join('') +
+    (hsState.openState ? tab('state', 'ti-map-pin', escapeHtml(hsShortName(hsState.openState))) : '');
+  document.querySelectorAll('#hsSidePanel .hs-pane').forEach(pane =>
+    pane.classList.toggle('is-active', pane.dataset.pane === hsState.panelTab));
+}
+
+function hsSetPanelTab(tab) {
+  hsState.panelTab = tab;
+  renderHsPanelTabs();
+  // A chart drawn while its tab was hidden has no size; draw it now.
+  if (tab === 'trend') renderHsTrendChart(cachedHotspots);
+  if (tab === 'live') renderHsLive(cachedHotspots);
+  if (tab === 'state') hsRenderStatePanel();
+}
+
+function hsOpenState(stateName) {
+  if (!(cachedHotspots || []).some(s => s.state === stateName)) return;
+  hsHighlightState(stateName);
+  hsState.stateTab = 'news';
+  if (hsState.panelTab !== 'state') hsState.lastTab = hsState.panelTab;
+  hsSetPanelTab('state');
+  hsLoadStateNews(stateName);
+  document.getElementById('hsStateBody').scrollTop = 0;
+  document.querySelector('.hs-main-grid').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  document.addEventListener('keydown', hsStateKeydown);
+}
+
+function hsCloseState() {
+  document.removeEventListener('keydown', hsStateKeydown);
+  Chart.getChart('hsStateTrend')?.destroy();
+  hsHighlightState(null);
+  hsSetPanelTab(hsState.panelTab === 'state' ? hsState.lastTab : hsState.panelTab);
+}
+
+function hsStateKeydown(event) {
+  if (event.key === 'Escape' && !/^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) hsCloseState();
+}
+
+function hsSetStateTab(tab) {
+  hsState.stateTab = tab;
+  hsRenderStatePanel();
+}
+
+function hsStateTabHtml(s, tab, checkpoints) {
+  const none = text => `<div class="hs-live-empty">${text}</div>`;
+  if (tab === 'news') {
+    const local = hsStateNewsEntry(s.state).data;
+    if (local) {
+      return hsStateNewsNote(s.state) + (local.events.length
+        ? local.events.map(hsLocalItemHtml).join('')
+        : none(`No incident reports were found for ${escapeHtml(s.state)} in the last ${local.windowDays} days.`));
+    }
+    return hsStateNewsNote(s.state) + (s.liveArticles.length
+      ? s.liveArticles.map(article => hsLiveItemHtml({ kind: 'news', article, states: [s] }, false)).join('')
+      : none(`No news report from the last 24 hours names ${escapeHtml(s.state)}.`));
+  }
+  if (tab === 'citizen') {
+    return s.liveReports.length
+      ? s.liveReports.map(report => hsLiveItemHtml({ kind: 'citizen', report, states: [s] }, false)).join('')
+      : none(hsState.reportsLoaded
+          ? `No located citizen report in the last ${HS_REPORT_WINDOW_DAYS} days falls inside ${escapeHtml(s.state)}.`
+          : 'Citizen reports are unavailable from this server.');
+  }
+  if (tab === 'aid') {
+    if (!s.awsdRecords.length) return none(`The aid worker security database holds no record for ${escapeHtml(s.state)}.`);
+    const records = [...s.awsdRecords].sort((a, b) => b.year - a.year);
+    return `<div class="hs-table-wrap"><table class="hs-table hs-mini-table">
+      <thead><tr><th>Year</th><th>Place</th><th>Attack</th><th>Actor</th><th title="Killed / wounded / kidnapped">K / W / Kd</th><th>What happened</th></tr></thead>
+      <tbody>${records.map(r => `<tr>
+        <td>${r.year}</td><td>${escapeHtml(r.city || '—')}</td><td>${escapeHtml(r.attack || '—')}</td>
+        <td>${escapeHtml(r.actor || '—')}</td><td>${r.killed} / ${r.wounded} / ${r.kidnapped}</td>
+        <td class="hs-mini-detail">${escapeHtml(r.details || '—')}</td></tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+  if (!checkpoints.length) return none(`No checkpoint is on record for ${escapeHtml(s.state)}.`);
+  return `<div class="hs-table-wrap"><table class="hs-table hs-mini-table">
+    <thead><tr><th>Checkpoint</th><th>Road</th><th>Type</th><th>Status</th></tr></thead>
+    <tbody>${checkpoints.map(cp => `<tr>
+      <td>${escapeHtml(cp.name)}</td><td>${escapeHtml(cp.road || '—')}</td>
+      <td>${escapeHtml(cp.type || '—')}</td><td>${escapeHtml(cp.status || '—')}</td></tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function hsRenderStatePanel() {
+  const s = (cachedHotspots || []).find(row => row.state === hsState.openState);
+  if (!s || hsState.panelTab !== 'state') return;
+  const level = hsLevel(s.composite);
+  const weights = hsState.weights || HS_WEIGHTS_DB;
+  const total = cachedHotspots.length;
+  const checkpoints = checkpointRecords.filter(cp => hsRegionToState(cp.state) === s.state);
+
+  document.getElementById('hsStateTop').innerHTML = `
+    <div class="hs-sp-id hs-lv-${level.key}">
+      <span class="hs-sp-swatch" style="background:${hsRampColor(s.composite)}"></span>
+      <div>
+        <div class="hs-sp-title">${escapeHtml(s.state)}</div>
+        <div class="hs-sp-sub">${escapeHtml(s.zone)} &middot; Rank #${s.rank} of ${total} &middot; <span class="hs-badge">${level.label}</span></div>
+      </div>
+    </div>
+    <div class="hs-sp-actions">
+      <button type="button" class="hs-tool-btn" onclick="hsCloseState()" title="Close this state and go back to the national tabs"><i class="ti ti-x"></i> Close</button>
+      <button type="button" class="hs-tool-btn" onclick="hsLocateState('${escapeHtml(s.state)}')" title="Zoom the map to this state"><i class="ti ti-map-pin"></i> Zoom</button>
+      <button type="button" class="hs-tool-btn hs-tool-primary" onclick="exportStateReport('${escapeHtml(s.state)}')" title="Download this state's analysis"><i class="ti ti-download"></i> Export</button>
+    </div>`;
+
+  const shiftText = s.rankShift > 0 ? `Up ${s.rankShift} on live signals`
+    : s.rankShift < 0 ? `Down ${-s.rankShift} on live signals` : 'Unchanged by live signals';
+  const tile = (label, value, note, cls = '') => `
+    <div class="hs-stat ${cls}"><div class="hs-stat-label">${label}</div>
+      <div class="hs-stat-value">${value}</div><div class="hs-stat-note">${note}</div></div>`;
+  const share = (value, key) => {
+    const whole = cachedHotspots.reduce((sum, row) => sum + row[key], 0);
+    return whole ? `${((value / whole) * 100).toFixed(1)}% of national total` : 'No national total';
+  };
+
+  const drivers = HS_WEIGHT_LABELS.filter(([key]) => weights[key] > 0).map(([key, label]) => `
+    <div class="hs-driver">
+      <span class="hs-driver-name">${label}<em>weight ${Math.round(weights[key] * 100)}%</em></span>
+      <span class="hs-bar-track"><span class="hs-bar-fill" style="width:${Math.round(s.parts[key] * 100)}%"></span></span>
+      <span class="hs-driver-val" title="Share of the highest state on this input">${Math.round(s.parts[key] * 100)}%</span>
+      <span class="hs-driver-pts" title="Points this input adds to the score">+${s.points[key].toFixed(1)}</span>
+    </div>`).join('');
+
+  const actorTotal = HS_ACTORS.reduce((sum, [key]) => sum + (s.actors[key] || 0), 0);
+  const actors = actorTotal
+    ? HS_ACTORS.map(([key, label]) => {
+        const count = s.actors[key] || 0;
+        return `<div class="hs-driver hs-driver-actor">
+          <span class="hs-driver-name">${label}</span>
+          <span class="hs-bar-track"><span class="hs-actor-seg hs-actor-${key}" style="display:block;height:100%;width:${(count / actorTotal) * 100}%"></span></span>
+          <span class="hs-driver-val">${count}</span>
+        </div>`;
+      }).join('')
+    : '<div class="hs-live-empty">No aid worker record or current headline attributes an attack here.</div>';
+
+  const tabs = [
+    ['news', 'Local news', hsStateNewsEntry(s.state).data ? hsStateNewsEntry(s.state).data.events.length : s.liveArticles.length],
+    ['citizen', 'Citizen reports', s.liveReports.length],
+    ['aid', 'Aid worker records', s.awsdRecords.length],
+    ['checkpoints', 'Checkpoints', checkpoints.length]
+  ];
+
+  document.getElementById('hsStateBody').innerHTML = `
+    <div class="hs-stat-row hs-lv-${level.key}">
+      ${tile('Composite risk', `${s.composite}<small>/100</small>`, `Database only: ${s.baseline}`, 'is-score')}
+      ${tile('National rank', `#${s.rank}<small>of ${total}</small>`, shiftText)}
+      ${tile('Deaths', s.deaths.toLocaleString(), share(s.deaths, 'deaths'), 'is-danger')}
+      ${tile('Incidents', s.incidents.toLocaleString(), share(s.incidents, 'incidents'))}
+      ${tile('Aid incidents', s.awsdCount, `${s.awsdAffected} worker${s.awsdAffected === 1 ? '' : 's'} affected`)}
+      ${tile('Live signals', s.liveCount, `${s.liveArticles.length} news &middot; ${s.liveReports.length} citizen`)}
+    </div>
+
+      <div class="hs-chart-block">
+        <div class="hs-block-head"><i class="ti ti-chart-bar"></i> What drives the score</div>
+        <div class="hs-drivers">${drivers}</div>
+        <div class="hs-sp-foot">Bars show ${escapeHtml(hsShortName(s.state))} against the highest state on each input. The points add up to the score of ${s.composite}.</div>
+      </div>
+      <div class="hs-chart-block">
+        <div class="hs-block-head"><i class="ti ti-users"></i> Who is behind the attacks</div>
+        <div class="hs-drivers">${actors}</div>
+        ${actorTotal ? `<div class="hs-sp-foot">From ${s.awsdRecords.length} aid worker record${s.awsdRecords.length === 1 ? '' : 's'} and ${s.liveArticles.length} current headline${s.liveArticles.length === 1 ? '' : 's'}.</div>` : ''}
+      </div>
+
+    <div class="hs-chart-block">
+      <div class="hs-block-head"><i class="ti ti-chart-line"></i> Aid worker incidents by year</div>
+      ${s.awsdRecords.length
+        ? '<div class="hs-chart-frame"><canvas id="hsStateTrend"></canvas></div>'
+        : `<div class="hs-live-empty">No aid worker incident is recorded for ${escapeHtml(s.state)}.</div>`}
+    </div>
+
+    <div class="hs-chart-block">
+      <div class="hs-tabs" role="tablist">
+        ${tabs.map(([key, label, count]) => `<button type="button" role="tab" class="hs-tab${hsState.stateTab === key ? ' is-active' : ''}"
+          aria-selected="${hsState.stateTab === key}" onclick="hsSetStateTab('${key}')">${label}<span class="hs-tab-count">${count}</span></button>`).join('')}
+      </div>
+      <div class="hs-tab-panel${hsState.stateTab === 'news' || hsState.stateTab === 'citizen' ? ' hs-live-list' : ''}">${hsStateTabHtml(s, hsState.stateTab, checkpoints)}</div>
+    </div>`;
+
+  hsRenderStateTrend(s);
+}
+
+function hsRenderStateTrend(s) {
+  const canvas = document.getElementById('hsStateTrend');
+  if (!canvas) return;
+  const { tc, gc } = getChartThemeColors();
+  const years = [...new Set(awsdData.map(r => r.year))].sort((a, b) => a - b);
+  const count = pick => years.map(year => s.awsdRecords.filter(r => r.year === year).reduce((sum, r) => sum + pick(r), 0));
+  new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: years,
+      datasets: [
+        { label: 'Incidents', data: count(() => 1), backgroundColor: '#2e8fff', borderRadius: 3, maxBarThickness: 18 },
+        { label: 'Workers affected', data: count(r => r.affected), backgroundColor: '#f5a623', borderRadius: 3, maxBarThickness: 18 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'bottom', labels: { color: tc, font: { size: 10 }, boxWidth: 10, boxHeight: 10, padding: 10 } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: tc, font: { size: 10 }, maxTicksLimit: 12 } },
+        y: { beginAtZero: true, grid: { color: gc }, ticks: { color: tc, font: { size: 10 }, precision: 0 } }
+      }
+    }
+  });
 }
 
 // ── Export ───────────────────────────────────────────────────
 
+function hsCsvCell(value) {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
+function hsDownloadCsv(rows, filename) {
+  const text = rows.map(row => row.map(hsCsvCell).join(',')).join('\r\n');
+  const blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function hsFormulaText() {
+  const weights = hsState.weights || HS_WEIGHTS_DB;
+  return HS_WEIGHT_LABELS.filter(([key]) => weights[key] > 0)
+    .map(([key, label]) => `${label} ${Math.round(weights[key] * 100)}%`).join(' + ');
+}
+
 function exportHotspotReport() {
   if (!cachedHotspots) return;
-  const weights = hsState.weights || HS_WEIGHTS_DB;
-  const cell = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
-  const formula = HS_WEIGHT_LABELS.filter(([key]) => weights[key] > 0)
-    .map(([key, label]) => `${label} ${Math.round(weights[key] * 100)}%`).join(' + ');
-  const lines = [
-    [cell('GeoSentry NG — composite risk report')],
-    [cell(`Generated ${new Date().toISOString()}`)],
-    [cell(`Risk score = ${formula}; scores are relative to the highest-risk state (100)`)],
+  hsDownloadCsv([
+    ['GeoSentry NG — composite risk report'],
+    [`Generated ${new Date().toISOString()}`],
+    [`Risk score = ${hsFormulaText()}; scores are relative to the highest-risk state (100)`],
     [],
     ['Rank', 'State', 'Risk score', 'Level', 'Database-only score', 'Rank shift from live signals',
      'Deaths', 'Incidents', 'Aid worker incidents', 'Aid workers affected',
-     'Live news reports (24h)', 'Citizen reports', 'Latest headline', 'Headline URL'].map(cell),
+     'Live news reports (24h)', 'Citizen reports', 'Latest headline', 'Headline URL'],
     ...cachedHotspots.map(s => [
       s.rank, s.state, s.composite, hsLabel(s.composite), s.baseline, s.rankShift,
       s.deaths, s.incidents, s.awsdCount, s.awsdAffected,
       s.liveArticles.length, s.liveReports.length,
       s.liveArticles[0]?.title || '', s.liveArticles[0]?.url || ''
-    ].map(cell))
-  ];
-  const blob = new Blob(['﻿' + lines.map(line => line.join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `geosentry-risk-report-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    ])
+  ], `geosentry-risk-report-${new Date().toISOString().slice(0, 10)}.csv`);
+}
+
+// Everything the state panel shows, as one sectioned CSV.
+function exportStateReport(stateName) {
+  const s = (cachedHotspots || []).find(row => row.state === stateName);
+  if (!s) return;
+  const weights = hsState.weights || HS_WEIGHTS_DB;
+  const checkpoints = checkpointRecords.filter(cp => hsRegionToState(cp.state) === s.state);
+  const national = key => cachedHotspots.reduce((sum, row) => sum + row[key], 0);
+  const share = key => (national(key) ? `${((s[key] / national(key)) * 100).toFixed(1)}%` : '');
+  const years = [...new Set(s.awsdRecords.map(r => r.year))].sort((a, b) => a - b);
+  const section = (title, header, rows, emptyText) =>
+    [[], [title], ...(rows.length ? [header, ...rows] : [[emptyText]])];
+
+  hsDownloadCsv([
+    [`GeoSentry NG — state risk profile: ${s.state}`],
+    [`Generated ${new Date().toISOString()}`],
+    [`Risk score = ${hsFormulaText()}; scores are relative to the highest-risk state (100)`],
+    [],
+    ['SUMMARY'],
+    ['Measure', 'Value', 'Note'],
+    ['State', s.state, s.zone],
+    ['Composite risk score', s.composite, 'out of 100'],
+    ['Risk level', hsLabel(s.composite), ''],
+    ['National rank', s.rank, `of ${cachedHotspots.length}`],
+    ['Rank shift from live signals', s.rankShift, 'positive = moved up the ranking'],
+    ['Database-only score', s.baseline, 'score without live signals'],
+    ['Deaths', s.deaths, `${share('deaths')} of national total`],
+    ['Incidents', s.incidents, `${share('incidents')} of national total`],
+    ['Aid worker incidents', s.awsdCount, ''],
+    ['Aid workers affected', s.awsdAffected, ''],
+    ['Live news reports (24h)', s.liveArticles.length, ''],
+    ['Citizen reports', s.liveReports.length, `last ${HS_REPORT_WINDOW_DAYS} days`],
+    ['Checkpoints on record', checkpoints.length, ''],
+    ...section('SCORE DRIVERS',
+      ['Input', 'Weight', 'Share of highest state', 'Points added to score'],
+      HS_WEIGHT_LABELS.filter(([key]) => weights[key] > 0).map(([key, label]) =>
+        [label, `${Math.round(weights[key] * 100)}%`, `${Math.round(s.parts[key] * 100)}%`, s.points[key].toFixed(1)]), ''),
+    ...section('ATTACK ACTORS', ['Actor', 'Attributed records'],
+      HS_ACTORS.filter(([key]) => s.actors[key]).map(([key, label]) => [label, s.actors[key]]),
+      'No attributed records'),
+    ...section('AID WORKER INCIDENTS BY YEAR', ['Year', 'Incidents', 'Workers affected'],
+      years.map(year => {
+        const records = s.awsdRecords.filter(r => r.year === year);
+        return [year, records.length, records.reduce((sum, r) => sum + r.affected, 0)];
+      }), 'No aid worker incidents recorded'),
+    ...section('NEWS REPORTS (LAST 24H)', ['Published', 'Type', 'Headline', 'Source', 'URL'],
+      s.liveArticles.map(a => [a.seenDate, a.attack, a.title, a.domain, a.url]),
+      'No current news report names this state'),
+    ...section(`LOCAL AND REGIONAL REPORTS (LAST ${hsStateNewsEntry(s.state).data?.windowDays || 7} DAYS)`,
+      ['Published', 'Type', 'Headline', 'Towns named', 'Source', 'Outlets carrying it', 'Media', 'URL'],
+      (hsStateNewsEntry(s.state).data?.events || []).map(e =>
+        [e.seenDate, e.categoryLabel, e.title, e.places.join('; '), e.source, e.sourceCount, (e.media || []).join('; '), e.url]),
+      hsStateNewsEntry(s.state).data ? 'No incident reports found' : 'Local sources had not been read when this was exported'),
+    ...section('CITIZEN REPORTS', ['Received', 'Category', 'Severity', 'Description'],
+      s.liveReports.map(r => [r.receivedAt, r.category, r.severity, r.message]),
+      'No located citizen report'),
+    ...section('AID WORKER SECURITY RECORDS',
+      ['Year', 'Place', 'Attack', 'Actor', 'Killed', 'Wounded', 'Kidnapped', 'Affected', 'Details'],
+      [...s.awsdRecords].sort((a, b) => b.year - a.year).map(r =>
+        [r.year, r.city, r.attack, r.actor, r.killed, r.wounded, r.kidnapped, r.affected, r.details]),
+      'No aid worker security records'),
+    ...section('CHECKPOINTS', ['Checkpoint', 'Road', 'Type', 'Status'],
+      checkpoints.map(cp => [cp.name, cp.road, cp.type, cp.status]), 'No checkpoints on record')
+  ], `geosentry-${s.state.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-profile-${new Date().toISOString().slice(0, 10)}.csv`);
 }

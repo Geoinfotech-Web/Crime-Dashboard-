@@ -18,7 +18,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 
-from route_news import build_route_news
+from route_news import FOREIGN_RE, build_route_news
+from route_roads import build_road_route
 
 
 ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
@@ -236,6 +237,10 @@ def extract_feed_items(feed, keywords, location_keywords, pattern_cache, cutoff)
             if pattern_cache[keyword].search(haystack)
         ]
         if location_keywords and not matched_locations:
+            continue
+        # Nigeria only: a headline about another country that names nowhere
+        # in Nigeria is dropped, even from a Nigerian paper.
+        if FOREIGN_RE.search(title) and not any(pattern_cache[keyword].search(title) for keyword in location_keywords):
             continue
 
         link = read_link(node)
@@ -457,6 +462,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/route-news":
             self.handle_route_news(parse_qs(parsed.query))
             return
+        if parsed.path == "/api/road-route":
+            self.handle_road_route(parse_qs(parsed.query))
+            return
         parts = parsed.path.split("/")
         if (len(parts) == 6 and parts[1] == "api" and parts[2] == "reports"
                 and parts[4] == "media"):
@@ -512,6 +520,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(message)
 
+    def handle_road_route(self, query):
+        """The real road between a chain of towns (Travel Safety)."""
+        try:
+            self.send_json(200, build_road_route(query.get("points", [""])[0]))
+        except ValueError as exc:
+            self.send_json(400, {"error": str(exc)})
+        except Exception as exc:  # pragma: no cover - the routing server is external
+            self.send_json(502, {"error": f"Road routing is unavailable: {exc}"})
+
     def handle_route_news(self, query):
         """News for the states and towns along a road (Travel Safety)."""
         def values(name):
@@ -525,6 +542,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 hubs=values("hubs"),
                 label=(query.get("label", [""])[0])[:80],
                 days=(query.get("days", [None])[0]),
+                local=query.get("local", [""])[0] == "1",
             )
             self.send_json(200, payload)
         except ValueError as exc:

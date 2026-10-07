@@ -285,50 +285,97 @@
 
     <div class="hs-main-grid">
       <section class="hs-map-panel">
-        <div class="hs-sec-head">Risk intensity map &mdash; click any zone for details</div>
+        <div class="hs-sec-head">Risk intensity map &mdash; click any state for its analysis</div>
         <div class="hs-map-wrap">
           <div id="hotspotMap"></div>
           <div class="hs-map-legend">
             <div class="hs-map-legend-title">Composite risk</div>
-            <div class="hs-map-legend-bar"></div>
-            <div class="hs-map-legend-ends"><span>0 low</span><span>100 critical</span></div>
+            <div class="hs-map-legend-bar" id="hsLegendBar"></div>
+            <div class="hs-map-legend-ends"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+            <div class="hs-map-legend-caption"><span>Lower</span><span>Higher</span></div>
           </div>
         </div>
       </section>
 
-      <section class="hs-charts-panel">
-        <div class="hs-chart-block">
-          <div class="hs-block-head"><i class="ti ti-chart-bar"></i> Composite risk &mdash; top 10 states</div>
-          <div class="hs-bars" id="hsRiskBars"></div>
+      <section class="hs-charts-panel" id="hsSidePanel">
+        <div class="hs-ptabs" id="hsPanelTabs" role="tablist"></div>
+
+        <div class="hs-pane" data-pane="risk">
+          <div class="hs-chart-block">
+            <div class="hs-block-head"><i class="ti ti-chart-bar"></i> Composite risk &mdash; top 10 states</div>
+            <div class="hs-bars" id="hsRiskBars"></div>
+          </div>
+          <div class="hs-chart-block">
+            <div class="hs-block-head"><i class="ti ti-stack-2"></i> States by risk level</div>
+            <div class="hs-level-strip" id="hsLevelStrip"></div>
+          </div>
         </div>
-        <div class="hs-chart-block">
-          <div class="hs-block-head"><i class="ti ti-users"></i> Attack actor breakdown &mdash; top 5 hotspots</div>
-          <div class="hs-bars" id="hsActorBars"></div>
-          <div class="hs-actor-legend" id="hsActorLegend"></div>
+
+        <div class="hs-pane" data-pane="actors">
+          <div class="hs-chart-block">
+            <div class="hs-block-head"><i class="ti ti-users"></i> Attack actor breakdown &mdash; top 10 hotspots</div>
+            <div class="hs-bars" id="hsActorBars"></div>
+            <div class="hs-actor-legend" id="hsActorLegend"></div>
+            <div class="hs-sp-foot">Built from aid worker security records and the current headlines that name each state.</div>
+          </div>
         </div>
-        <div class="hs-chart-block">
-          <div class="hs-block-head"><i class="ti ti-chart-line"></i> Aid worker incidents by year &mdash; top 3 states</div>
-          <div class="hs-chart-frame"><canvas id="hsTrendChart"></canvas></div>
+
+        <div class="hs-pane" data-pane="trend">
+          <div class="hs-chart-block hs-chart-fill">
+            <div class="hs-block-head"><i class="ti ti-chart-line"></i> Aid worker incidents by year &mdash; top 3 states</div>
+            <div class="hs-chart-frame"><canvas id="hsTrendChart"></canvas></div>
+          </div>
+        </div>
+
+        <div class="hs-pane" data-pane="live">
+          <div class="hs-live-head">
+            <div class="hs-block-head"><i class="ti ti-broadcast"></i> Live signals feeding the index</div>
+            <div class="hs-live-summary" id="hsLiveSummary"></div>
+          </div>
+          <div class="hs-live-grid">
+            <div class="hs-live-picker">
+              <label class="hs-search">
+                <i class="ti ti-search"></i>
+                <input type="search" id="hsLiveSearch" placeholder="Find a state" autocomplete="off" oninput="hsSetLiveQuery(this.value)">
+              </label>
+              <div class="hs-live-picker-scroll">
+                <table class="hs-table hs-pick-table" id="hsLivePicker"></table>
+              </div>
+            </div>
+            <div class="hs-live-detail">
+              <div class="hs-live-detail-head" id="hsLiveDetailHead"></div>
+              <div class="hs-live-list" id="hsLiveList"></div>
+              <div class="hs-pager" id="hsLivePager"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hs-pane" data-pane="ranking">
+          <div class="hs-rank-head">
+            <div class="hs-block-head"><i class="ti ti-list-numbers"></i> Full state risk ranking</div>
+            <div class="hs-rank-tools">
+              <div class="hs-seg" role="group" aria-label="Group the ranking by">
+                <button type="button" class="hs-seg-btn" data-rank-mode="level" onclick="hsSetRankMode('level')">By risk level</button>
+                <button type="button" class="hs-seg-btn" data-rank-mode="zone" onclick="hsSetRankMode('zone')">By zone</button>
+              </div>
+              <label class="hs-search">
+                <i class="ti ti-search"></i>
+                <input type="search" id="hsRankSearch" placeholder="Find a state" autocomplete="off" oninput="hsSetRankQuery(this.value)">
+              </label>
+              <button type="button" class="hs-tool-btn" id="hsRankToggleAll" onclick="hsToggleAllRankGroups()"></button>
+            </div>
+          </div>
+          <div class="hs-table-wrap">
+            <table class="hs-table hs-rank-table" id="hsRankTable"></table>
+          </div>
+        </div>
+
+        <div class="hs-pane hs-state-panel" data-pane="state" id="hsStatePanel">
+          <div class="hs-sp-top" id="hsStateTop"></div>
+          <div class="hs-sp-body" id="hsStateBody"></div>
         </div>
       </section>
     </div>
-
-    <section class="hs-live-section">
-      <div class="hs-live-head">
-        <div class="hs-block-head"><i class="ti ti-broadcast"></i> Live signals feeding the index</div>
-        <div class="hs-live-summary" id="hsLiveSummary"></div>
-      </div>
-      <div class="hs-live-list" id="hsLiveList"></div>
-    </section>
-
-    <section>
-      <div class="hs-sec-head">Full state risk ranking</div>
-      <div class="hs-table-section">
-        <div class="hs-table-wrap">
-          <table class="hs-table" id="hsRankTable"></table>
-        </div>
-      </div>
-    </section>
 
   </div>
 </div>
@@ -360,6 +407,17 @@
           <button type="button" class="tv-mode" data-mode="Convoy" onclick="selectTravelMode(this)"><i class="ti ti-truck"></i><span>Convoy</span></button>
         </div>
       </div>
+      <div class="tv-parks" id="tvParksBox" hidden>
+        <div class="filter-group">
+          <label class="filter-label" id="tvParkFromLbl" for="tvParkFrom">Departure park</label>
+          <select class="filter-select" id="tvParkFrom"></select>
+        </div>
+        <div class="filter-group">
+          <label class="filter-label" id="tvParkToLbl" for="tvParkTo">Arrival park</label>
+          <select class="filter-select" id="tvParkTo"></select>
+        </div>
+        <div class="tv-park-hint" id="tvParkHint"></div>
+      </div>
       <button class="apply-btn tv-assess" onclick="assessRoute()"><i class="ti ti-shield-check"></i> Find and assess routes</button>
     </div>
 
@@ -369,6 +427,11 @@
     <div class="tv-sec-label">Selected route</div>
     <div class="panel-card tv-rating-card" id="tvRatingCard">
       <div class="tv-empty">Select a route and tap <strong>Assess this route</strong>.</div>
+    </div>
+
+    <div class="tv-sec-label">Directions by road</div>
+    <div class="panel-card tv-dir-card" id="tvDirList">
+      <div class="tv-empty">Assess a route to see the roads it follows.</div>
     </div>
   </aside>
 
@@ -388,6 +451,7 @@
           <div class="leg-row"><span class="tv-leg-line tv-leg-high"></span>High risk</div>
           <div class="leg-row"><span class="tv-leg-line tv-leg-alt"></span>Other route options</div>
           <div class="leg-row"><span class="tv-leg-news"></span>Town with reports</div>
+          <div class="leg-row"><span class="tv-leg-park"><i class="ti ti-bus"></i></span>Bus park (bus mode)</div>
         </div>
       </div>
     </div>
@@ -428,7 +492,7 @@
       </div>
     </div>
     <div class="panel-card">
-      <div class="tv-sub">Recommendations</div>
+      <div class="tv-sub">Safe travel guide</div>
       <div class="tv-recs" id="tvRecs"><div class="tv-empty">Assess a route to see recommendations.</div></div>
       <div class="tv-emergency">
         <i class="ti ti-urgent"></i>

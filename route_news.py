@@ -1,7 +1,8 @@
-"""Route news for the Travel Safety advisor.
+"""State and route news for the Hotspot Analysis and Travel Safety views.
 
-Given the states and towns a road passes through, gather what regional and
-national outlets have reported there recently, keep the reports a traveller
+Given the states and towns a road passes through - or one state and its
+towns - gather what Nigerian radio, newspapers, magazines and online outlets
+have reported there recently, keep the reports a traveller
 would care about, fold several outlets' coverage of one event into a single
 event, and turn the result into a 0-100 "live pressure" figure.
 
@@ -25,9 +26,10 @@ from urllib.request import Request, urlopen
 
 SOURCES_FILE = "regional_sources.json"
 FETCH_TIMEOUT = 8
-MAX_WORKERS = 10
+MAX_WORKERS = 16
 MAX_STATES = 14
 MAX_PLACES = 16
+MAX_LOCAL_PLACES = 24      # one state on its own can afford to name more towns
 # Pressure at which the live index reaches about 63 of 100.
 PRESSURE_SCALE = 12
 GOOGLE_NEWS = "https://news.google.com/rss/search?q={query}&hl=en-NG&gl=NG&ceid=NG:en"
@@ -36,10 +38,10 @@ USER_AGENT = "Mozilla/5.0 (compatible; GeoSentryNG/1.0; route news monitor)"
 # What a traveller needs to know about, most serious first: the first
 # category whose pattern matches a headline is the one it gets.
 CATEGORIES = [
-    ("kidnapping",     "Kidnapping",      1.00, r"kidnap|abduct|hostage|ransom|whisk"),
+    ("kidnapping",     "Kidnapping",      1.00, r"kidnap|abduct|hostage|ransom|whisk|garkuwa"),
     ("explosion",      "Explosion",       1.00, r"\bbomb|\bied\b|explosi|\bblast"),
-    ("armed_attack",   "Armed attack",    1.00, r"bandit|gunm[ae]n|terrorist|boko haram|iswap|ambush|insurgent|herdsmen|militia|attack|\braid|invade"),
-    ("killing",        "Killing",         0.90, r"\bkill|shot dead|murder|massacre|behead|slain|lynch|corpse"),
+    ("armed_attack",   "Armed attack",    1.00, r"bandit|gunm[ae]n|terrorist|boko haram|iswap|ambush|insurgent|herdsmen|militia|attack|\braid|invade|['’]?yan bindiga|\bhari\b"),
+    ("killing",        "Killing",         0.90, r"\bkill|shot dead|murder|massacre|behead|slain|lynch|corpse|\bkashe|hallaka"),
     ("robbery",        "Robbery",         0.70, r"robber|carjack|hijack|snatch|highway thie"),
     ("unrest",         "Unrest",          0.50, r"protest|riot|\bclash|curfew|cultis|\bmob\b|barricad"),
     ("road_crash",     "Road crash",      0.45, r"crash|accident|collision|tanker|\bfrsc\b|somersault|multiple.vehicle"),
@@ -53,7 +55,9 @@ CATEGORY_PATTERNS = [(key, re.compile(pattern, re.I)) for key, _, _, pattern in 
 EVENT_RE = re.compile(
     r"kidnapp?ed|abducted|killed|kills|ambush|attacked|attack on|shot|shoot|explod|crash|collid|"
     r"murder|lynch|robbed|hijack|flood|collapse|blocked|rescue|arrest|nab|burnt|raze|invade|"
-    r"gunmen|bandits|protest|clash|accident|stranded", re.I)
+    r"gunmen|bandits|protest|clash|accident|stranded|"
+    # Hausa-language radio: kidnapped, bandits, attack, killed.
+    r"garkuwa|yan bindiga|\bhari\b|\bkashe|hallaka", re.I)
 # Statements, politics and opinion: a state can be named in these all day
 # without anything having happened on its roads.
 CONTEXT_RE = re.compile(
@@ -75,6 +79,25 @@ TIME_OF_DAY = [
     ("morning",   re.compile(r"\bmorning", re.I)),
     ("afternoon", re.compile(r"afternoon|broad daylight|\bnoon\b", re.I)),
 ]
+
+# Nigeria only. A headline that names another country and no Nigerian state
+# or town is about somewhere else, whichever paper carried it.
+FOREIGN_RE = re.compile(
+    r"\b(Ghana|Kenya|South Africa|Sudan|Somalia|Mali|Burkina Faso|Niger Republic|Chad|Cameroon|Benin Republic|"
+    r"Togo|Congo|DRC|Ethiopia|Uganda|Tanzania|Senegal|Guinea|Gaza|Israel|Iran|Iraq|Ukraine|Russia|Lebanon|"
+    r"Syria|Yemen|Houthis?|Saudi|Pakistan|India|China|Japan|US|U\.S\.|USA|America|UK|Britain|London|France|"
+    r"Germany|Haiti|Mexico|Brazil|Turkey|Türkiye)\b")
+
+# Social networks, video sites and forums turn up in news searches. They are
+# not outlets: anyone can post there, so nothing from them is used.
+BLOCKED_DOMAINS = ("instagram.com", "facebook.com", "x.com", "twitter.com", "tiktok.com", "youtube.com",
+                   "threads.net", "threads.com", "linkedin.com", "nairaland.com", "reddit.com", "medium.com",
+                   "blogspot.com", "wordpress.com", "telegram.org", "t.me", "whatsapp.com", "msn.com",
+                   "headtopics.com", "opera.com", "newsbreak.com")
+# A search also turns up other countries' sites re-running Nigerian stories.
+# Only Nigerian outlets are used, so a foreign country domain is left out.
+FOREIGN_TLD_RE = re.compile(
+    r"\.(ke|za|gh|uk|in|pk|au|ca|us|cn|ru|fr|de|ae|qa|il|tr|eg|et|ug|tz|cm|sn|zw|zm|rw|ie|nz|sg|my|ph|bd|lk)$")
 
 # Names that are also ordinary words, or shared with somewhere else, only
 # count when written as a state.
@@ -101,11 +124,56 @@ TOWNS = {
     "Taraba": ["Jalingo", "Wukari", "Takum"], "Yobe": ["Damaturu", "Potiskum", "Geidam", "Buni Yadi"],
     "Zamfara": ["Gusau", "Tsafe", "Talata Mafara", "Anka", "Maru", "Shinkafi"],
 }
+# Local government headquarters and communities, added to the towns above.
+MORE_TOWNS = {
+    "Abia": ["Ohafia", "Arochukwu", "Isuikwuato"],
+    "Adamawa": ["Ganye", "Michika", "Madagali", "Gombi"],
+    "Akwa Ibom": ["Oron", "Abak", "Ikot Abasi"],
+    "Anambra": ["Ihiala", "Ekwulobia", "Aguata"],
+    "Bauchi": ["Misau", "Ningi", "Alkaleri", "Tafawa Balewa"],
+    "Bayelsa": ["Nembe", "Sagbama", "Ogbia"],
+    "Benue": ["Katsina-Ala", "Agatu", "Guma", "Ukum", "Yelewata"],
+    "Borno": ["Bama", "Konduga", "Dikwa", "Chibok", "Biu", "Ngala", "Rann"],
+    "Cross River": ["Obudu", "Akamkpa", "Ugep"],
+    "Delta": ["Sapele", "Abraka", "Ozoro", "Patani"],
+    "Ebonyi": ["Afikpo", "Ezza", "Ishielu"],
+    "Edo": ["Uromi", "Igarra", "Okada"],
+    "Ekiti": ["Ikere", "Ikole", "Omuo"],
+    "Enugu": ["Udi", "Awgu", "Uzo-Uwani", "Eha-Amufu", "Ninth Mile"],
+    "FCT (Abuja)": ["Kuje", "Abaji", "Kwali", "Zuba", "Lugbe", "Nyanya"],
+    "Gombe": ["Kaltungo", "Billiri", "Dukku", "Bajoga", "Kumo"],
+    "Imo": ["Mbaise", "Oguta", "Ohaji"],
+    "Jigawa": ["Gumel", "Kazaure", "Birnin Kudu", "Ringim"],
+    "Kaduna": ["Giwa", "Chikun", "Kajuru", "Zangon Kataf", "Kauru", "Sanga"],
+    "Kano": ["Wudil", "Bichi", "Gwarzo", "Rano", "Tudun Wada", "Doguwa"],
+    "Katsina": ["Dutsinma", "Batsari", "Safana", "Faskari", "Danmusa", "Bakori"],
+    "Kebbi": ["Argungu", "Danko-Wasagu", "Jega", "Bagudo"],
+    "Kogi": ["Ajaokuta", "Idah", "Ankpa", "Obajana"],
+    "Kwara": ["Kaiama", "Patigi", "Jebba", "Omu-Aran"],
+    "Lagos": ["Mushin", "Oshodi", "Agege", "Apapa", "Ajah", "Alimosho"],
+    "Nasarawa": ["Doma", "Nasarawa Eggon", "Karu"],
+    "Niger": ["Mokwa", "Rafi", "Kagara", "Mariga", "Munya", "Zungeru", "Mashegu", "Borgu", "New Bussa"],
+    "Ogun": ["Ifo", "Ilaro", "Ijebu-Igbo"],
+    "Ondo": ["Ikare", "Okitipupa", "Ifon"],
+    "Osun": ["Ede", "Iwo", "Ikirun", "Ikire"],
+    "Oyo": ["Saki", "Igboho", "Igangan", "Ibarapa", "Kishi"],
+    "Plateau": ["Wase", "Kanam", "Shendam", "Pankshin", "Langtang"],
+    "Rivers": ["Emohua", "Omoku", "Ikwerre", "Khana", "Okrika", "Degema", "Elele"],
+    "Sokoto": ["Goronyo", "Illela", "Gwadabawa", "Rabah", "Kebbe", "Tangaza", "Wurno"],
+    "Taraba": ["Gashaka", "Karim Lamido", "Donga", "Zing"],
+    "Yobe": ["Gashua", "Nguru", "Gujba"],
+    "Zamfara": ["Kaura Namoda", "Bungudu", "Zurmi", "Bukkuyum", "Gummi", "Bakura", "Birnin Magaji"]
+}
+for _state, _names in MORE_TOWNS.items():
+    TOWNS[_state] = TOWNS[_state] + [name for name in _names if name not in TOWNS[_state]]
+
 # Town names that are also everyday words or people's names ("okada riders",
 # "Isa Pantami", "iron ore"). They only count when the sentence treats them
 # as a place: "in Ore", "Benin-Ore road", "Okada junction".
 AMBIGUOUS_PLACES = {"Ore", "Okada", "Aba", "Isa", "Toro", "Bori", "Jere", "Owo", "Itu", "Auno",
-                    "Mowe", "Ifon", "Kura", "Maru", "Anka", "Offa", "Epe", "Bida"}
+                    "Mowe", "Ifon", "Kura", "Maru", "Anka", "Offa", "Epe", "Bida", "Bama", "Biu", "Ede", "Iwo",
+                    "Ifo", "Udi", "Guma", "Giwa", "Rano", "Rafi", "Doma", "Karu", "Ezza", "Oron", "Abak",
+                    "Zing", "Jega", "Wase", "Saki", "Idah", "Rann", "Ajah", "Sanga", "Kauru", "Kuje", "Zuba"}
 PLACE_BEFORE = r"(?:\b(?:in|at|near|around|along|from|to|of|outside)\s+|-)"
 PLACE_AFTER = r"(?:-|,|\s+(?i:road|town|junction|axis|community|area|expressway|highway|bridge|lga|council|forest))"
 
@@ -232,7 +300,7 @@ def _google_url(query: str) -> str:
     return GOOGLE_NEWS.format(query=quote(query))
 
 
-def _plan(sources, states, places, label, days):
+def _plan(sources, states, places, label, days, local=False):
     """Which feeds to read for this route. Each job: (source meta, url)."""
     wanted = set(states)
     incident_terms = "(kidnap OR abducted OR bandits OR gunmen OR attack OR killed OR ambush OR robbers OR crash OR flood)"
@@ -244,7 +312,7 @@ def _plan(sources, states, places, label, days):
             continue
         meta = {"name": outlet["name"], "scope": outlet.get("scope", "national"),
                 "states": outlet.get("states", []), "via": outlet.get("via"),
-                "domain": outlet.get("domain", "")}
+                "domain": outlet.get("domain", ""), "medium": outlet.get("medium", "")}
         if outlet.get("via") == "feed" and outlet.get("url"):
             jobs.append((meta, outlet["url"]))
         elif outlet.get("via") == "google" and outlet.get("domain"):
@@ -256,11 +324,18 @@ def _plan(sources, states, places, label, days):
         jobs.append(({"name": f"Google News · {name}", "scope": "search", "states": [state],
                       "via": "search", "domain": "", "stateHint": state},
                      _google_url(f"{phrase} {incident_terms} when:{days}d")))
+        # Local-government and community stories rarely make a state-level
+        # search. Asked for one state, or a short route; a long one has too many.
+        if local or len(states) <= 6:
+            jobs.append(({"name": f"Google News · {name} communities", "scope": "search", "states": [state],
+                          "via": "search", "domain": "", "stateHint": state},
+                         _google_url(f'{phrase} ("local government" OR LGA OR community OR village OR villagers) '
+                                     f"{incident_terms} when:{days}d")))
 
     # A search can only hold so many names, so a long route asks twice.
     for start in range(0, len(places), 8):
         quoted = " OR ".join(f'"{place}"' for place in places[start:start + 8])
-        jobs.append(({"name": "Google News · towns on route" + (f" ({start // 8 + 1})" if len(places) > 8 else ""),
+        jobs.append(({"name": ("Google News · towns in the state" if local else "Google News · towns on route") + (f" ({start // 8 + 1})" if len(places) > 8 else ""),
                       "scope": "search", "states": [], "via": "search", "domain": ""},
                      _google_url(f"({quoted}) {incident_terms} when:{days}d")))
     if label:
@@ -308,11 +383,15 @@ def _recency(age_hours: float) -> float:
     return 0.2
 
 
-def build_route_news(root: Path, states, places=None, label="", days=None, hubs=None):
+def build_route_news(root: Path, states, places=None, label="", days=None, hubs=None, local=False):
+    """News along a route, or - with local=True - for one state and its towns."""
     sources = _load_sources(root)
     known_states = {state for zone in sources["zones"].values() for state in zone}
     states = [state for state in dict.fromkeys(states) if state in known_states][:MAX_STATES]
-    places = [place for place in dict.fromkeys(places or []) if place][:MAX_PLACES]
+    if local:
+        states = states[:1]
+        places = TOWNS.get(states[0], [])[:MAX_LOCAL_PLACES] if states else []
+    places = [place for place in dict.fromkeys(places or []) if place][:MAX_LOCAL_PLACES if local else MAX_PLACES]
     days = max(1, min(int(days or sources.get("windowDays", 7)), 14))
     ttl = float(sources.get("cacheMinutes", 10)) * 60
     if not states:
@@ -321,7 +400,7 @@ def build_route_news(root: Path, states, places=None, label="", days=None, hubs=
     # Towns where the route changes road. A city is in the news every day, so
     # a report only counts as "on the road" there when it is about the road.
     hubs = set(hubs or [])
-    route_key = json.dumps([states, places, label, days, sorted(hubs)])
+    route_key = json.dumps([states, places, label, days, sorted(hubs), local])
     cached = _results.get(route_key)
     if cached and time.time() - cached[0] < ttl:
         return cached[1]
@@ -335,9 +414,10 @@ def build_route_news(root: Path, states, places=None, label="", days=None, hubs=
     elsewhere = [pattern for state in known_states - set(states) for pattern in _state_patterns(state)]
     place_patterns = {place: _place_pattern(place) for place in places}
     known_domains = {outlet["domain"] for outlet in sources["outlets"] if outlet.get("domain")}
+    medium_of = {outlet["domain"]: outlet.get("medium", "") for outlet in sources["outlets"] if outlet.get("domain")}
     nigeria = re.compile(r"\bNigeria", re.I)
 
-    jobs = _plan(sources, states, places, label, days)
+    jobs = _plan(sources, states, places, label, days, local)
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         fetched = list(executor.map(lambda job: _fetch(job[1], ttl), jobs))
 
@@ -374,6 +454,8 @@ def build_route_news(root: Path, states, places=None, label="", days=None, hubs=
                          if any(pattern.search(sample) for pattern in patterns)])
 
             hit_places, hit_states = locate(title)
+            if FOREIGN_RE.search(title) and not hit_places and not hit_states:
+                continue
             road = bool(ROAD_RE.search(title))
             if not road:
                 hit_places = [place for place in hit_places if place not in hubs]
@@ -393,6 +475,8 @@ def build_route_news(root: Path, states, places=None, label="", days=None, hubs=
             # A town name on its own could be anywhere in the world. Without a
             # state in the headline, only take it from a paper we know.
             domain = item["publisherDomain"] or meta["domain"] or _domain(item["url"])
+            if domain.endswith(BLOCKED_DOMAINS) or FOREIGN_TLD_RE.search(domain):
+                continue
             if (hit_places and not hit_states and meta["via"] == "search"
                     and domain not in known_domains and not nigeria.search(title)):
                 continue
@@ -412,6 +496,7 @@ def build_route_news(root: Path, states, places=None, label="", days=None, hubs=
             reports.append({
                 "title": title, "url": item["url"], "source": outlet["name"] if outlet else publisher,
                 "sourceDomain": domain, "regional": bool(outlet),
+                "medium": medium_of.get(domain) or meta.get("medium", ""),
                 "seenDate": published.isoformat().replace("+00:00", "Z") if published else None,
                 "ageHours": round(age_hours, 1) if age_hours is not None else None,
                 "category": category, "categoryLabel": CATEGORY_LABEL[category],
@@ -422,7 +507,7 @@ def build_route_news(root: Path, states, places=None, label="", days=None, hubs=
                 "_tokens": _tokens(title), "_published": published,
             })
         source_rows.append({
-            "name": meta["name"], "scope": meta["scope"], "via": meta["via"],
+            "name": meta["name"], "scope": meta["scope"], "via": meta["via"], "medium": meta.get("medium", ""),
             "states": meta.get("states", []), "ok": error is None or stale, "stale": stale,
             "items": len(items), "matched": matched, "error": error,
         })
@@ -471,7 +556,9 @@ def build_route_news(root: Path, states, places=None, label="", days=None, hubs=
         weight *= 1 + 0.15 * min(len(publishers) - 1, 3)
         row.update(id=f"e{index}", weight=round(weight, 2), sourceCount=len(publishers),
                    regionalSources=sorted({r["source"] for r in members if r["regional"]}),
-                   coverage=[{"source": r["source"], "url": r["url"], "regional": r["regional"]} for r in members[:6]])
+                   media=sorted({r["medium"] for r in members if r["medium"]}),
+                   coverage=[{"source": r["source"], "url": r["url"], "regional": r["regional"],
+                              "medium": r["medium"]} for r in members[:6]])
         pressure += weight
         for state in row["states"]:
             by_state[state] = by_state.get(state, 0.0) + weight
@@ -492,6 +579,10 @@ def build_route_news(root: Path, states, places=None, label="", days=None, hubs=
                for outlet in sources["outlets"]
                if outlet.get("via") == "offline" and set(outlet.get("states", [])) & set(states)]
     answered = [row for row in source_rows if row["ok"]]
+    by_medium = {}
+    for row in answered:
+        if row["medium"]:
+            by_medium[row["medium"]] = by_medium.get(row["medium"], 0) + 1
 
     # A route through eight states collects more headlines than one through
     # two without being that much worse per kilometre, so the bar rises with
@@ -522,6 +613,7 @@ def build_route_news(root: Path, states, places=None, label="", days=None, hubs=
         "sources": {
             "checked": len(source_rows), "answered": len(answered),
             "regionalAnswered": sum(1 for row in answered if row["scope"] == "regional"),
+            "byMedium": by_medium,
             "failed": [row for row in source_rows if not row["ok"]],
             "list": source_rows, "offline": offline,
         },
