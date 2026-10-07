@@ -855,6 +855,7 @@ stateData.forEach(d=>{
 });
 
 const checkpointData = data.checkpoints || [];
+checkpointRecords = checkpointData;
 let checkpointLayer = L.markerClusterGroup({
   maxClusterRadius: 55,
   spiderfyOnMaxZoom: true,
@@ -1200,6 +1201,7 @@ loadDashboardData()
 let hotspotMapInstance = null;
 let hotspotInitialized = false;
 let cachedHotspots = null;
+let checkpointRecords = [];   // read by the hotspot state profile
 let mainTileLayer = null;
 // Esri Canvas basemaps — keyless, free for use, ideal grey canvas for data viz.
 // (Carto's basemaps.cartocdn.com now require a registered API key.)

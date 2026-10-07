@@ -1,0 +1,818 @@
+{
+ "_about": "Bus parks and terminals for the Travel Safety bus mode, by the network town they serve. Entries with approx=false are mapped as bus stations in OpenStreetMap and sit at their mapped position. Entries with approx=true are well-known parks OpenStreetMap has not mapped as stations; they are placed at the centre of the neighbourhood named in 'area', so the pin can be a few hundred metres off. Towns with an empty list have no park on record: the route then starts from the town centre. To add a park, add an entry with its name and coordinates - no code changes needed.",
+ "source": "OpenStreetMap contributors (ODbL), retrieved 2026-10-06",
+ "towns": {
+  "Abeokuta": [],
+  "Abuja (FCT)": [
+   {
+    "id": "known-jabi-motor-park",
+    "name": "Jabi Motor Park",
+    "lat": 9.06383,
+    "lng": 7.43269,
+    "operator": "",
+    "approx": false,
+    "area": "Jabi Motor Park",
+    "kmFromCentre": 4.0
+   },
+   {
+    "id": "known-utako-motor-park",
+    "name": "Utako Motor Park",
+    "lat": 9.06514,
+    "lng": 7.4328,
+    "operator": "",
+    "approx": false,
+    "area": "Utako Motor Park",
+    "kmFromCentre": 4.0
+   },
+   {
+    "id": "osm-n5986883885",
+    "name": "God is Good Motors (GIGM) terminal",
+    "lat": 9.0655,
+    "lng": 7.43808,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 4.5
+   },
+   {
+    "id": "osm-n13383633683",
+    "name": "Mabushi Bus Terminal",
+    "lat": 9.08657,
+    "lng": 7.45651,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 6.5
+   },
+   {
+    "id": "osm-n5234383123",
+    "name": "Nyanya bus station",
+    "lat": 9.02342,
+    "lng": 7.57063,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 19.8
+   },
+   {
+    "id": "osm-n4465077889",
+    "name": "Zuba",
+    "lat": 9.09324,
+    "lng": 7.21597,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 20.1
+   }
+  ],
+  "Akure": [
+   {
+    "id": "osm-w837276050",
+    "name": "Ondo State Bus Terminal",
+    "lat": 7.26118,
+    "lng": 5.17466,
+    "operator": "State Government",
+    "approx": false,
+    "kmFromCentre": 2.1
+   },
+   {
+    "id": "osm-n3651962628",
+    "name": "Benin Garage",
+    "lat": 7.27484,
+    "lng": 5.2449,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 6.7
+   },
+   {
+    "id": "osm-w711998140",
+    "name": "Northgate Garage",
+    "lat": 7.30766,
+    "lng": 5.13874,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 8.5
+   }
+  ],
+  "Bauchi": [
+   {
+    "id": "osm-n11013682842",
+    "name": "Yankari Motor park",
+    "lat": 10.30791,
+    "lng": 9.84416,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 0.5
+   }
+  ],
+  "Benin City": [
+   {
+    "id": "osm-n2350849579",
+    "name": "Osaro Motors park",
+    "lat": 6.33639,
+    "lng": 5.62078,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 1.9
+   },
+   {
+    "id": "osm-n2153201050",
+    "name": "ECTS (Comrade Bus)",
+    "lat": 6.3341,
+    "lng": 5.62257,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 2.1
+   },
+   {
+    "id": "osm-n2350899867",
+    "name": "Iyare Motor Park",
+    "lat": 6.34857,
+    "lng": 5.62207,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 2.5
+   },
+   {
+    "id": "osm-n2350899852",
+    "name": "Cliffosa Motor Park",
+    "lat": 6.34696,
+    "lng": 5.6238,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 2.6
+   },
+   {
+    "id": "osm-n2350899853",
+    "name": "De Modern Bus Station",
+    "lat": 6.34742,
+    "lng": 5.62331,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 2.6
+   },
+   {
+    "id": "osm-n2350879761",
+    "name": "Owan West Mass Transit",
+    "lat": 6.34434,
+    "lng": 5.62695,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 2.8
+   },
+   {
+    "id": "osm-n981284618",
+    "name": "Edo Line",
+    "lat": 6.34359,
+    "lng": 5.62824,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 2.9
+   },
+   {
+    "id": "osm-n2350879747",
+    "name": "Edegbe Line",
+    "lat": 6.34531,
+    "lng": 5.62862,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 3.0
+   },
+   {
+    "id": "osm-n2349475726",
+    "name": "Crystay Line Park",
+    "lat": 6.34381,
+    "lng": 5.63191,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 3.3
+   },
+   {
+    "id": "osm-n2349475716",
+    "name": "Bob Izua Motor Park",
+    "lat": 6.34268,
+    "lng": 5.6332,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 3.4
+   },
+   {
+    "id": "osm-n2349475731",
+    "name": "Glory Motor Park",
+    "lat": 6.34906,
+    "lng": 5.63179,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 3.5
+   },
+   {
+    "id": "osm-n2349475706",
+    "name": "Akwa Ibom Motor Park",
+    "lat": 6.34574,
+    "lng": 5.6351,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 3.7
+   },
+   {
+    "id": "osm-n4755886707",
+    "name": "AKTC Motors",
+    "lat": 6.34533,
+    "lng": 5.63553,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 3.7
+   },
+   {
+    "id": "osm-n4755886708",
+    "name": "Faith Motors",
+    "lat": 6.34437,
+    "lng": 5.63636,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 3.8
+   }
+  ],
+  "Calabar": [],
+  "Damaturu": [],
+  "Enugu": [
+   {
+    "id": "known-holy-ghost-motor-park",
+    "name": "Holy Ghost Motor Park",
+    "lat": 6.4357,
+    "lng": 7.48334,
+    "operator": "",
+    "approx": true,
+    "area": "Ogbete",
+    "kmFromCentre": 7.4
+   }
+  ],
+  "Gombe": [
+   {
+    "id": "osm-n7972408585",
+    "name": "Gombe State Transport Services (Gombe Line)",
+    "lat": 10.28685,
+    "lng": 11.16551,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 0.6
+   }
+  ],
+  "Gusau": [],
+  "Ibadan": [
+   {
+    "id": "known-iwo-road-motor-park",
+    "name": "Iwo Road Motor Park",
+    "lat": 7.40335,
+    "lng": 3.94107,
+    "operator": "",
+    "approx": true,
+    "area": "Iwo Road",
+    "kmFromCentre": 2.9
+   },
+   {
+    "id": "known-challenge-new-garage-motor-park",
+    "name": "Challenge (New Garage) Motor Park",
+    "lat": 7.34699,
+    "lng": 3.87831,
+    "operator": "",
+    "approx": true,
+    "area": "Challenge",
+    "kmFromCentre": 8.3
+   },
+   {
+    "id": "known-ojoo-motor-park",
+    "name": "Ojoo Motor Park",
+    "lat": 7.47095,
+    "lng": 3.91822,
+    "operator": "",
+    "approx": true,
+    "area": "Ojoo",
+    "kmFromCentre": 10.9
+   }
+  ],
+  "Ilorin": [
+   {
+    "id": "osm-n13047974726",
+    "name": "Soludero Bus Terminal",
+    "lat": 8.48737,
+    "lng": 4.56448,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 2.7
+   }
+  ],
+  "Jos": [
+   {
+    "id": "osm-n12574391840",
+    "name": "Terminus Motor Park",
+    "lat": 9.91928,
+    "lng": 8.8931,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 4.6
+   },
+   {
+    "id": "known-bauchi-road-motor-park",
+    "name": "Bauchi Road Motor Park",
+    "lat": 9.9419,
+    "lng": 8.89347,
+    "operator": "",
+    "approx": true,
+    "area": "Bauchi Road",
+    "kmFromCentre": 6.4
+   }
+  ],
+  "Kaduna": [
+   {
+    "id": "known-television-garage",
+    "name": "Television Garage",
+    "lat": 10.44608,
+    "lng": 7.42302,
+    "operator": "",
+    "approx": true,
+    "area": "Television",
+    "kmFromCentre": 7.2
+   },
+   {
+    "id": "osm-w39469591",
+    "name": "Kaduna Long haul Bus station",
+    "lat": 10.58607,
+    "lng": 7.44017,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 8.8
+   },
+   {
+    "id": "osm-w38919157",
+    "name": "Kawo Motor Park",
+    "lat": 10.5855,
+    "lng": 7.44826,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 9.0
+   },
+   {
+    "id": "known-mando-motor-park",
+    "name": "Mando Motor Park",
+    "lat": 10.59098,
+    "lng": 7.37164,
+    "operator": "",
+    "approx": true,
+    "area": "Mando",
+    "kmFromCentre": 10.2
+   }
+  ],
+  "Kano": [
+   {
+    "id": "osm-n2177482930",
+    "name": "Mallam Karto Park",
+    "lat": 12.00711,
+    "lng": 8.5399,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 2.3
+   },
+   {
+    "id": "known-unguwa-uku-motor-park",
+    "name": "Unguwa Uku Motor Park",
+    "lat": 11.95638,
+    "lng": 8.57375,
+    "operator": "",
+    "approx": true,
+    "area": "Unguwa Uku",
+    "kmFromCentre": 7.6
+   },
+   {
+    "id": "known-naibawa-motor-park",
+    "name": "Naibawa Motor Park",
+    "lat": 11.91645,
+    "lng": 8.54087,
+    "operator": "",
+    "approx": true,
+    "area": "Naibawa",
+    "kmFromCentre": 9.6
+   }
+  ],
+  "Katsina": [
+   {
+    "id": "osm-n5666084148",
+    "name": "Katsina State Transport Authority",
+    "lat": 12.98109,
+    "lng": 7.58699,
+    "operator": "eHealth Africa",
+    "approx": false,
+    "kmFromCentre": 1.7
+   },
+   {
+    "id": "osm-n5656741191",
+    "name": "Central Motor Park",
+    "lat": 12.9699,
+    "lng": 7.60083,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 2.2
+   },
+   {
+    "id": "osm-n5784351153",
+    "name": "Kano motor park",
+    "lat": 12.96954,
+    "lng": 7.59972,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 2.3
+   }
+  ],
+  "Lagos": [
+   {
+    "id": "known-jibowu-terminal",
+    "name": "Jibowu Terminal",
+    "lat": 6.51727,
+    "lng": 3.36663,
+    "operator": "",
+    "approx": true,
+    "area": "Jibowu",
+    "kmFromCentre": 1.6
+   },
+   {
+    "id": "osm-w707609369",
+    "name": "Yaba Bus Terminal",
+    "lat": 6.51081,
+    "lng": 3.3708,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 1.8
+   },
+   {
+    "id": "osm-w693552184",
+    "name": "Oshodi Transport Interchange - Terminal 1",
+    "lat": 6.55492,
+    "lng": 3.35124,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 4.6
+   },
+   {
+    "id": "osm-w693552186",
+    "name": "Oshodi Transport Interchange - Terminal 3",
+    "lat": 6.55659,
+    "lng": 3.35271,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 4.6
+   },
+   {
+    "id": "osm-w693552185",
+    "name": "Oshodi Transport Interchange - Terminal 2",
+    "lat": 6.55581,
+    "lng": 3.35084,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 4.7
+   },
+   {
+    "id": "osm-w706089072",
+    "name": "Oyingbo Bus Terminal",
+    "lat": 6.4809,
+    "lng": 3.38291,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 4.9
+   },
+   {
+    "id": "osm-w1144287447",
+    "name": "Mafoluku Bus Terminal",
+    "lat": 6.55574,
+    "lng": 3.32427,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 7.0
+   },
+   {
+    "id": "known-ojota-motor-park",
+    "name": "Ojota Motor Park",
+    "lat": 6.58707,
+    "lng": 3.37915,
+    "operator": "",
+    "approx": true,
+    "area": "Ojota",
+    "kmFromCentre": 7.0
+   },
+   {
+    "id": "osm-w704979167",
+    "name": "Ikeja Bus Terminal",
+    "lat": 6.59134,
+    "lng": 3.33891,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 8.7
+   },
+   {
+    "id": "osm-n4755897332",
+    "name": "Obalende Motor Park",
+    "lat": 6.44964,
+    "lng": 3.40738,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 8.9
+   },
+   {
+    "id": "osm-w738528609",
+    "name": "Obalende Bus Terminus",
+    "lat": 6.44958,
+    "lng": 3.40871,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 8.9
+   },
+   {
+    "id": "osm-w671991257",
+    "name": "Tafawa Balewa Square Bus Terminal",
+    "lat": 6.44572,
+    "lng": 3.40099,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 9.1
+   },
+   {
+    "id": "osm-w671812228",
+    "name": "Mile 12 Bus Terminal",
+    "lat": 6.60547,
+    "lng": 3.3996,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 9.3
+   },
+   {
+    "id": "known-mile-2-motor-park",
+    "name": "Mile 2 Motor Park",
+    "lat": 6.45879,
+    "lng": 3.3134,
+    "operator": "",
+    "approx": true,
+    "area": "Mile 2",
+    "kmFromCentre": 10.3
+   },
+   {
+    "id": "osm-n3085114191",
+    "name": "Ikotun Terminal",
+    "lat": 6.54801,
+    "lng": 3.26779,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 12.6
+   },
+   {
+    "id": "osm-n3085114204",
+    "name": "Ikotun Bus Station",
+    "lat": 6.54938,
+    "lng": 3.268,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 12.6
+   },
+   {
+    "id": "osm-n2583682650",
+    "name": "Ogba Bus Park",
+    "lat": 6.6325,
+    "lng": 3.34174,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 12.7
+   },
+   {
+    "id": "known-berger-motor-park",
+    "name": "Berger Motor Park",
+    "lat": 6.64156,
+    "lng": 3.36851,
+    "operator": "",
+    "approx": true,
+    "area": "Ojodu Berger",
+    "kmFromCentre": 13.1
+   },
+   {
+    "id": "osm-w738682066",
+    "name": "Igando",
+    "lat": 6.55158,
+    "lng": 3.24105,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 15.6
+   },
+   {
+    "id": "osm-n4932079181",
+    "name": "Liberty Bus-Stop",
+    "lat": 6.61295,
+    "lng": 3.26649,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 15.9
+   }
+  ],
+  "Lokoja": [],
+  "Maiduguri": [
+   {
+    "id": "osm-w264963043",
+    "name": "Adamwa Sunshine Motor Park",
+    "lat": 11.83936,
+    "lng": 13.14683,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 0.8
+   },
+   {
+    "id": "osm-n5604821200",
+    "name": "Borno Express Station",
+    "lat": 11.83471,
+    "lng": 13.11572,
+    "operator": "Borno Express",
+    "approx": false,
+    "kmFromCentre": 3.8
+   }
+  ],
+  "Makurdi": [
+   {
+    "id": "known-wurukum-motor-park",
+    "name": "Wurukum Motor Park",
+    "lat": 7.72749,
+    "lng": 8.54642,
+    "operator": "",
+    "approx": true,
+    "area": "Wurukum",
+    "kmFromCentre": 2.8
+   }
+  ],
+  "Minna": [],
+  "Onitsha": [
+   {
+    "id": "osm-n7956218499",
+    "name": "Peace Mass Transit Park",
+    "lat": 6.13447,
+    "lng": 6.79285,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 1.9
+   },
+   {
+    "id": "osm-n7956225897",
+    "name": "Peace Mass Transit Park",
+    "lat": 6.12949,
+    "lng": 6.79501,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 2.5
+   }
+  ],
+  "Port Harcourt": [
+   {
+    "id": "osm-n5589854921",
+    "name": "Eagle Transport Company",
+    "lat": 4.85052,
+    "lng": 7.05455,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 3.9
+   },
+   {
+    "id": "osm-n5586214523",
+    "name": "Aghofure Motors",
+    "lat": 4.81585,
+    "lng": 7.00707,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 4.7
+   },
+   {
+    "id": "osm-n7956172597",
+    "name": "Rivers Transport Company RTC",
+    "lat": 4.81725,
+    "lng": 7.00728,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 4.7
+   },
+   {
+    "id": "osm-n7956172598",
+    "name": "Imo Transport Company ITC Park",
+    "lat": 4.81599,
+    "lng": 7.00765,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 4.7
+   },
+   {
+    "id": "osm-n6069107485",
+    "name": "Aghofure Motors",
+    "lat": 4.86663,
+    "lng": 6.99986,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 7.9
+   }
+  ],
+  "Sokoto": [
+   {
+    "id": "osm-w318507720",
+    "name": "Sokoto Main Garage",
+    "lat": 13.05876,
+    "lng": 5.22604,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 0.9
+   },
+   {
+    "id": "osm-n3249091263",
+    "name": "Cross Country Motor Park",
+    "lat": 13.05591,
+    "lng": 5.21538,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 2.1
+   }
+  ],
+  "Uyo": [
+   {
+    "id": "osm-n4756396721",
+    "name": "AKTC Park",
+    "lat": 5.05548,
+    "lng": 7.88427,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 3.7
+   }
+  ],
+  "Yenagoa": [
+   {
+    "id": "osm-n7956224609",
+    "name": "King Koko Express",
+    "lat": 4.93485,
+    "lng": 6.28479,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 2.1
+   },
+   {
+    "id": "osm-n7956225491",
+    "name": "Ekeki Motor Park",
+    "lat": 4.92892,
+    "lng": 6.29521,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 3.1
+   },
+   {
+    "id": "osm-n5478678437",
+    "name": "Rahony Travels",
+    "lat": 4.93495,
+    "lng": 6.31008,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 4.8
+   },
+   {
+    "id": "osm-n5478686242",
+    "name": "God is Good Motors (GIGM) terminal",
+    "lat": 4.93483,
+    "lng": 6.3099,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 4.8
+   },
+   {
+    "id": "osm-n7956224593",
+    "name": "Opolo Motor Park",
+    "lat": 4.94845,
+    "lng": 6.33416,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 7.8
+   },
+   {
+    "id": "osm-n5506376649",
+    "name": "Peace Park",
+    "lat": 4.95381,
+    "lng": 6.35031,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 9.6
+   },
+   {
+    "id": "osm-n5468999125",
+    "name": "Aghofure Motors",
+    "lat": 4.95485,
+    "lng": 6.35893,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 10.6
+   }
+  ],
+  "Yola": [],
+  "Zaria": [
+   {
+    "id": "osm-n557611495",
+    "name": "Dadi Motor Park",
+    "lat": 11.12945,
+    "lng": 7.70485,
+    "operator": "",
+    "approx": false,
+    "kmFromCentre": 6.6
+   }
+  ]
+ }
+}
