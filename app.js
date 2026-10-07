@@ -783,10 +783,44 @@ function refreshChoropleth(){
   bubbleLayer.setStyle(choroStyle);
   bubbleLayer.eachLayer(l => { if (l.feature) l.setPopupContent(choroPopup(l.feature)); });
 }
-// Opt-in layer (off by default); load boundaries up front so the first toggle is instant.
+// ── ACLED TOTAL DEATHS choropleth (static reference; distinct amber ramp) ──
+function deathsChoroColor(d){
+  return d > 2000 ? '#7a0a0e' :
+         d > 1000 ? '#b11419' :
+         d > 500  ? '#e23b36' :
+         d > 200  ? '#ff5a5f' :
+         d > 0    ? '#ff9ea0' : '#2a3344';
+}
+function deathsChoroStyle(f){
+  const meta = stateMetaByNorm.get(normState(f.properties.shapeName));
+  const d = meta ? meta.deaths : 0;
+  return { fillColor: deathsChoroColor(d), fillOpacity: d ? 0.72 : 0.3, color: '#0b1420', weight: 1, opacity: 0.55 };
+}
+function deathsChoroPopup(f){
+  const meta = stateMetaByNorm.get(normState(f.properties.shapeName));
+  const name = meta ? meta.state : f.properties.shapeName;
+  const d = meta ? meta.deaths : 0;
+  return `
+    <div class="popup-title">&#x1F4CD; ${escapeHtml(name)} State</div>
+    <div class="popup-row"><span>Total deaths (ACLED)</span><span class="popup-metric-danger">${d.toLocaleString()}</span></div>
+    ${meta ? `<div class="popup-row"><span>ACLED incidents</span><span>${meta.incidents.toLocaleString()}</span></div>
+    <div class="popup-row"><span>Risk level</span><span class="${riskClass(d)}">${riskLabel(d)}</span></div>` : ''}`;
+}
+let deathsLayer = L.geoJSON(null, {
+  style: deathsChoroStyle,
+  onEachFeature: (f, layer) => {
+    layer.bindPopup(deathsChoroPopup(f));
+    layer.on({
+      mouseover: e => e.target.setStyle({ weight: 2, color: '#ffffff' }),
+      mouseout:  e => deathsLayer.resetStyle(e.target)
+    });
+  }
+});
+
+// Opt-in layers (off by default); load boundaries once and feed both choropleths.
 fetch('vendor/nigeria-states.geojson')
   .then(r => r.json())
-  .then(geo => { bubbleLayer.addData(geo); refreshChoropleth(); })
+  .then(geo => { bubbleLayer.addData(geo); deathsLayer.addData(geo); refreshChoropleth(); })
   .catch(err => console.error('Choropleth boundaries failed to load', err));
 
 function attackColor(a){
@@ -896,8 +930,8 @@ checkpointData.forEach(cp => {
   `).addTo(checkpointLayer);
 });
 
-const layers={bubbles:bubbleLayer,points:pointLayer,heat:heatLayer,checkpoints:checkpointLayer};
-const layerState={bubbles:false,points:true,heat:false,checkpoints:false};
+const layers={deaths:deathsLayer,bubbles:bubbleLayer,points:pointLayer,heat:heatLayer,checkpoints:checkpointLayer};
+const layerState={deaths:false,bubbles:false,points:true,heat:false,checkpoints:false};
 function toggleLayer(btn){
   const k=btn.dataset.layer;
   layerState[k]=!layerState[k];
@@ -943,11 +977,20 @@ function setRange(btn){
   document.querySelectorAll('#rangeControl .seg-btn').forEach(b=>b.classList.toggle('active', b===btn));
 }
 
-// Severity pills — visual filter toggles (AWSD records carry no severity field,
-// so these refine the display set rather than the historical data).
+// AWSD records have no severity field, so derive it from casualties:
+//   Critical = 3+ killed · High = 1–2 killed or 3+ kidnapped · Mod = the rest.
+function deriveSeverity(d){
+  const killed = d.killed || 0, kidnapped = d.kidnapped || 0;
+  if (killed >= 3) return 'Critical';
+  if (killed >= 1 || kidnapped >= 3) return 'High';
+  return 'Mod';
+}
+function activeSeverities(){
+  return new Set([...document.querySelectorAll('.sev-pill.active')].map(p => p.dataset.sev));
+}
 function toggleSevPill(btn){
   btn.classList.toggle('active');
-  renderFilterChips();
+  applyFilters();
 }
 
 function resetFilters(){
@@ -1033,6 +1076,20 @@ function renderFilterChips(){
     });
     wrap.appendChild(chip);
   });
+  // Severity chip (shown only when a subset of severities is active)
+  const allSev = document.querySelectorAll('.sev-pill');
+  const onSev = [...allSev].filter(p => p.classList.contains('active'));
+  if (allSev.length && onSev.length < allSev.length) {
+    const chip = document.createElement('span');
+    chip.className = 'fchip';
+    const label = onSev.length ? onSev.map(p => escapeHtml(p.dataset.sev)).join(', ') : 'none';
+    chip.innerHTML = `Severity: ${label} <button type="button" title="Reset severity" aria-label="Reset severity">&times;</button>`;
+    chip.querySelector('button').addEventListener('click', () => {
+      allSev.forEach(p => p.classList.add('active'));
+      applyFilters();
+    });
+    wrap.appendChild(chip);
+  }
 }
 
 let timeYearMax = 2026;
@@ -1042,9 +1099,11 @@ function applyFilters(){
   const atk=document.getElementById('attackFilter').value;
   const yr=document.getElementById('yearFilter').value;
   const act=document.getElementById('actorFilter').value;
+  const sevs=activeSeverities();
   const f=awsdData.filter(d=>{
     let ok=true;
     if(d.year>timeYearMax)ok=false;
+    if(!sevs.has(deriveSeverity(d)))ok=false;
     if(atk!=='all'&&d.attack!==atk)ok=false;
     if(yr==='2015+'&&d.year<2015)ok=false;
     if(yr==='2022+'&&d.year<2022)ok=false;
