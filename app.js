@@ -1317,6 +1317,30 @@ function openHotspotView() { showView('hotspot'); }
 function closeHotspotView() { showView('dashboard'); }
 function openTravelView() { showView('travel'); }
 
+// Maximize / restore the map panel a button sits in (dashboard, travel, hotspot).
+function toggleMapMax(btn) {
+  const panel = btn.closest('.map-center, .tv-map-card, .hs-map-panel');
+  if (!panel) return;
+  const on = panel.classList.toggle('map-max');
+  document.body.classList.toggle('has-map-max', on);
+  const icon = btn.querySelector('i');
+  if (icon) icon.className = on ? 'ti ti-minimize' : 'ti ti-maximize';
+  btn.title = on ? 'Restore map' : 'Maximize map';
+  setTimeout(() => {
+    [typeof mapInstance !== 'undefined' ? mapInstance : null,
+     typeof travelMap !== 'undefined' ? travelMap : null,
+     typeof hotspotMapInstance !== 'undefined' ? hotspotMapInstance : null]
+      .forEach(m => { try { if (m) m.invalidateSize(); } catch (e) {} });
+    if (on && panel.classList.contains('tv-map-card') && typeof fitTravelBounds === 'function') fitTravelBounds();
+  }, 240);
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const maxed = document.querySelector('.map-max');
+    if (maxed) { const b = maxed.querySelector('.map-max-btn'); if (b) toggleMapMax(b); }
+  }
+});
+
 function getChartThemeColors() {
   const isLight = document.documentElement.getAttribute('data-theme') === 'light';
   return {

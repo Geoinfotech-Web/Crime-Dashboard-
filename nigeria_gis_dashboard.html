@@ -159,7 +159,7 @@
 
   <!-- CENTER: MAP -->
   <section class="map-center">
-    <div class="panel-hd map-hd"><span><i class="ti ti-map-2"></i> Incident Intensity Map</span><span class="map-hd-note" id="mapCountNote">Showing geolocated incidents</span></div>
+    <div class="panel-hd map-hd"><span><i class="ti ti-map-2"></i> Incident Intensity Map</span><span class="map-hd-right"><span class="map-hd-note" id="mapCountNote">Showing geolocated incidents</span><button class="map-max-btn" onclick="toggleMapMax(this)" title="Maximize map"><i class="ti ti-maximize"></i></button></span></div>
     <div class="map-wrap">
       <div class="info-pill" id="infoPill">Click any marker for incident details · scroll to zoom</div>
       <div class="map-layers-panel" id="mapLayersPanel">
@@ -176,33 +176,6 @@
         </div>
       </div>
       <div id="map"></div>
-      <div class="map-legend" id="mapLegend">
-        <div class="leg-section" data-legend="bubbles">
-          <div class="leg-title">Aid incidents by state (filtered)</div>
-          <div class="leg-row"><span class="leg-swatch" style="background:#7a0a0e"></span>Highest</div>
-          <div class="leg-row"><span class="leg-swatch" style="background:#b11419"></span>High</div>
-          <div class="leg-row"><span class="leg-swatch" style="background:#e23b36"></span>Medium</div>
-          <div class="leg-row"><span class="leg-swatch" style="background:#ff5a5f"></span>Low</div>
-          <div class="leg-row"><span class="leg-swatch" style="background:#2a3344"></span>None</div>
-        </div>
-        <div class="leg-section" data-legend="points">
-          <div class="leg-title">Aid Worker Incidents</div>
-          <div class="leg-row"><div class="legend-dot legend-dot-kidnap"></div>Kidnapping</div>
-          <div class="leg-row"><div class="legend-dot legend-dot-shooting"></div>Shooting/Killing</div>
-          <div class="leg-row"><div class="legend-dot legend-dot-assault"></div>Assault/Other</div>
-        </div>
-        <div class="leg-section" data-legend="heat">
-          <div class="leg-title">Density Scatter</div>
-          <div class="leg-row"><span class="leg-heat-swatch"></span>Incident density</div>
-        </div>
-        <div class="leg-section" data-legend="checkpoints">
-          <div class="leg-title">Checkpoints</div>
-          <div class="leg-row"><div class="cp-legend cp-police-leg"></div>Police</div>
-          <div class="leg-row"><div class="cp-legend cp-military-leg"></div>Military</div>
-          <div class="leg-row"><div class="cp-legend cp-joint-leg"></div>Joint</div>
-          <div class="leg-row"><div class="cp-legend cp-customs-leg"></div>Customs</div>
-        </div>
-      </div>
     </div>
     <div class="time-slider-bar">
       <button class="ts-play" id="tsPlay" onclick="toggleTimePlay()" title="Play through years">
@@ -236,6 +209,36 @@
 
 <!-- ═══ BOTTOM CHARTS ═══ -->
 <div class="charts-row">
+  <div class="chart-card legend-card">
+    <div class="chart-title"><i class="ti ti-stack-2"></i> Map legend</div>
+    <div id="mapLegend" class="legend-inline">
+      <div class="leg-section" data-legend="bubbles">
+        <div class="leg-title">Aid incidents by state (filtered)</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#7a0a0e"></span>Highest</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#b11419"></span>High</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#e23b36"></span>Medium</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#ff5a5f"></span>Low</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#2a3344"></span>None</div>
+      </div>
+      <div class="leg-section" data-legend="points">
+        <div class="leg-title">Aid Worker Incidents</div>
+        <div class="leg-row"><div class="legend-dot legend-dot-kidnap"></div>Kidnapping</div>
+        <div class="leg-row"><div class="legend-dot legend-dot-shooting"></div>Shooting/Killing</div>
+        <div class="leg-row"><div class="legend-dot legend-dot-assault"></div>Assault/Other</div>
+      </div>
+      <div class="leg-section" data-legend="heat">
+        <div class="leg-title">Density Scatter</div>
+        <div class="leg-row"><span class="leg-heat-swatch"></span>Incident density</div>
+      </div>
+      <div class="leg-section" data-legend="checkpoints">
+        <div class="leg-title">Checkpoints</div>
+        <div class="leg-row"><div class="cp-legend cp-police-leg"></div>Police</div>
+        <div class="leg-row"><div class="cp-legend cp-military-leg"></div>Military</div>
+        <div class="leg-row"><div class="cp-legend cp-joint-leg"></div>Joint</div>
+        <div class="leg-row"><div class="cp-legend cp-customs-leg"></div>Customs</div>
+      </div>
+    </div>
+  </div>
   <div class="chart-card">
     <div class="chart-title"><i class="ti ti-chart-line"></i> Historical vs live trend</div>
     <div class="chart-frame"><canvas id="trendChart" role="img" aria-label="Historical incidents vs current live reports by year"></canvas></div>
@@ -285,7 +288,7 @@
 
     <div class="hs-main-grid">
       <section class="hs-map-panel">
-        <div class="hs-sec-head">Risk intensity map &mdash; click any state for its analysis</div>
+        <div class="hs-sec-head" style="display:flex;align-items:center;gap:10px"><span>Risk intensity map &mdash; click any state for its analysis</span><button class="map-max-btn" style="margin-left:auto" onclick="toggleMapMax(this)" title="Maximize map"><i class="ti ti-maximize"></i></button></div>
         <div class="hs-map-wrap">
           <div id="hotspotMap"></div>
           <div class="hs-map-legend">
@@ -440,7 +443,7 @@
     <div class="panel-card tv-map-card">
       <div class="panel-hd tv-map-hd">
         <span><i class="ti ti-route"></i> Route Risk Map — <span id="tvRouteTitle">select a route</span></span>
-        <span class="tv-map-note" id="tvStretchNote"></span>
+        <span class="map-hd-right"><span class="tv-map-note" id="tvStretchNote"></span><button class="map-max-btn" onclick="toggleMapMax(this)" title="Maximize map"><i class="ti ti-maximize"></i></button></span>
       </div>
       <div class="tv-map-wrap">
         <div id="travelMap"></div>
