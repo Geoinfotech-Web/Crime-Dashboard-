@@ -142,8 +142,8 @@
         <label class="filter-label">Severity</label>
         <div class="sev-pills" id="sevPills">
           <button type="button" class="sev-pill sev-crit active" data-sev="Critical" onclick="toggleSevPill(this)">Critical</button>
-          <button type="button" class="sev-pill sev-high" data-sev="High" onclick="toggleSevPill(this)">High</button>
-          <button type="button" class="sev-pill sev-mod" data-sev="Mod" onclick="toggleSevPill(this)">Mod</button>
+          <button type="button" class="sev-pill sev-high active" data-sev="High" onclick="toggleSevPill(this)">High</button>
+          <button type="button" class="sev-pill sev-mod active" data-sev="Mod" onclick="toggleSevPill(this)">Mod</button>
         </div>
       </div>
 
@@ -169,6 +169,7 @@
           <svg class="mlp-caret" id="mlpCaret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
         </button>
         <div class="mlp-body" id="mlpBody">
+          <button class="toggle-btn mlp-row" data-layer="deaths"><span class="mlp-dot mlp-dot-deaths"></span><span class="mlp-name">Total deaths (ACLED)</span><span class="mlp-switch"></span></button>
           <button class="toggle-btn mlp-row" data-layer="bubbles"><span class="mlp-dot mlp-dot-death"></span><span class="mlp-name">Aid incidents by state</span><span class="mlp-switch"></span></button>
           <button class="toggle-btn mlp-row active" data-layer="points"><span class="mlp-dot mlp-dot-aid"></span><span class="mlp-name">Aid incidents</span><span class="mlp-switch"></span></button>
           <button class="toggle-btn mlp-row" data-layer="heat"><span class="mlp-dot mlp-dot-heat"></span><span class="mlp-name">Density scatter</span><span class="mlp-switch"></span></button>
@@ -212,6 +213,15 @@
   <div class="chart-card legend-card">
     <div class="chart-title"><i class="ti ti-stack-2"></i> Map legend</div>
     <div id="mapLegend" class="legend-inline">
+      <div class="leg-section" data-legend="deaths">
+        <div class="leg-title">Total deaths by state (ACLED)</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#7a0a0e"></span>&gt; 2,000</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#b11419"></span>1,000 – 2,000</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#e23b36"></span>500 – 1,000</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#ff5a5f"></span>200 – 500</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#ff9ea0"></span>&lt; 200</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#2a3344"></span>No data</div>
+      </div>
       <div class="leg-section" data-legend="bubbles">
         <div class="leg-title">Aid incidents by state (filtered)</div>
         <div class="leg-row"><span class="leg-swatch" style="background:#7a0a0e"></span>Highest</div>
