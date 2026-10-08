@@ -45,6 +45,21 @@ let tvNewsTimer = null;
 const TV_DARK_TILE = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
 const TV_LIGHT_TILE = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}';
 const TV_TILE_OPTS = { attribution: 'Tiles &copy; Esri &mdash; &copy; OpenStreetMap contributors', maxZoom: 16 };
+const TV_ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
+// Basemaps the traveller can switch between. "dark" says whether labels drawn
+// over it need to be light. Canvas follows the app's light/dark theme.
+const TV_BASEMAPS = {
+  canvas:    { label: 'Canvas', icon: 'ti-map', themed: true },
+  streets:   { label: 'Streets', icon: 'ti-road', dark: false, maxNativeZoom: 19,
+               url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '&copy; OpenStreetMap contributors' },
+  satellite: { label: 'Satellite', icon: 'ti-satellite', dark: true, maxNativeZoom: 18,
+               url: `${TV_ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`,
+               labels: `${TV_ESRI}/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}`,
+               attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics' },
+  terrain:   { label: 'Terrain', icon: 'ti-mountain', dark: false, maxNativeZoom: 18,
+               url: `${TV_ESRI}/World_Topo_Map/MapServer/tile/{z}/{y}/{x}`, attribution: 'Tiles &copy; Esri &mdash; &copy; OpenStreetMap contributors' }
+};
+let tvBasemap = 'canvas', tvBaseLayers = [];
 
 // Relative incident likelihood by hour of day (0–23). Modelled: lowest mid-day,
 // rising through late afternoon, peaking at dusk/evening, elevated overnight.
@@ -393,7 +408,7 @@ function tvCondenseSteps(legs){
   }, []);
   let items = merge(legs.flatMap(leg => leg.steps.map(step => ({
     label: step.ref && step.name ? `${step.ref} · ${step.name}` : step.ref || step.name,
-    km: step.km, min: step.min
+    km: step.km, min: step.min, kind: step.kind || '', turn: step.turn || ''
   }))));
   for (let i = 0; i < items.length && items.length > 1;){
     if (items[i].km >= TV_DIRECTION_MIN_KM){ i++; continue; }
@@ -409,6 +424,21 @@ function tvCondenseSteps(legs){
     km = row.kmTo;
     return row;
   });
+}
+
+// Icon and wording for joining a road, from the router's manoeuvre.
+function tvTurn(step, first){
+  if (first) return { icon: 'ti-navigation-filled', verb: 'Leave' };
+  const turn = step.turn || '';
+  const side = turn.includes('left') ? 'left' : turn.includes('right') ? 'right' : '';
+  if (/roundabout|rotary/.test(step.kind)) return { icon: `ti-arrow-roundabout-${side || 'right'}`, verb: 'At the roundabout take' };
+  if (step.kind === 'merge') return { icon: 'ti-arrow-merge', verb: 'Merge onto' };
+  if (/ramp/.test(step.kind)) return { icon: `ti-arrow-ramp-${side || 'right'}`, verb: 'Take the slip road to' };
+  if (turn === 'uturn') return { icon: 'ti-arrow-back-up', verb: 'Turn back onto' };
+  if (side && turn.includes('sharp')) return { icon: `ti-arrow-sharp-turn-${side}`, verb: `Turn sharp ${side} onto` };
+  if (side && turn.includes('slight')) return { icon: `ti-arrow-bear-${side}`, verb: `Keep ${side} onto` };
+  if (side) return { icon: `ti-corner-up-${side}`, verb: `Turn ${side} onto` };
+  return { icon: 'ti-arrow-narrow-up', verb: 'Continue on' };
 }
 
 // Lay a planned route on the road the router returned. Everything that was an
@@ -515,30 +545,51 @@ function tvChosenPark(end){
   return tvParksFor(town).find(park => park.id === tvParkChoice[end]) || null;
 }
 
-// Fill the two park menus for the towns chosen, keeping a choice that still
-// applies and otherwise starting on the nearest park with a mapped position.
+// The chosen park, in a line or two: where it is and how sure its position is.
+function tvParkCardHtml(park, town){
+  const facts = [`${park.kmFromCentre} km from the centre of ${escapeHtml(town)}`];
+  if (park.operator) facts.push(escapeHtml(park.operator));
+  facts.push(park.approx ? `position approximate (${escapeHtml(park.area || 'neighbourhood')})` : 'mapped position');
+  return `<div class="tv-parkcard">
+    <div class="tv-parkcard-name">${escapeHtml(park.name)}</div>
+    <div class="tv-parkcard-facts">${facts.join(' · ')}</div>
+  </div>`;
+}
+
+// In bus mode the parks of each town are listed under it — From, then To —
+// with the chosen one described. A choice that still applies is kept; otherwise
+// it starts on the nearest park with a mapped position.
 function tvFillParks(){
-  const box = document.getElementById('tvParksBox');
-  box.hidden = tvMode !== 'Bus';
-  if (tvMode !== 'Bus') return;
-  const missing = [];
   ['from', 'to'].forEach(end => {
+    const box = document.getElementById(end === 'from' ? 'tvParksFrom' : 'tvParksTo');
+    box.hidden = tvMode !== 'Bus';
+    if (tvMode !== 'Bus') return;
     const town = document.getElementById(end === 'from' ? 'tvFrom' : 'tvTo').value;
     const parks = tvParksFor(town);
-    const select = document.getElementById(end === 'from' ? 'tvParkFrom' : 'tvParkTo');
-    document.getElementById(end === 'from' ? 'tvParkFromLbl' : 'tvParkToLbl').textContent =
-      `${end === 'from' ? 'Departure' : 'Arrival'} park · ${town}`;
     if (!parks.some(park => park.id === tvParkChoice[end])) tvParkChoice[end] = (parks.find(park => !park.approx) || parks[0])?.id || null;
-    select.disabled = !parks.length;
-    select.innerHTML = parks.length
-      ? parks.map(park => `<option value="${escapeHtml(park.id)}">${escapeHtml(park.name)}${park.approx ? ' (approx.)' : ''}</option>`).join('')
-      : '<option value="">No park on record — town centre</option>';
-    select.value = tvParkChoice[end] || '';
-    if (!parks.length) missing.push(town);
+    if (!parks.length){
+      box.innerHTML = `<div class="tv-park-hint"><i class="ti ti-info-circle"></i> No bus park is on record for ${escapeHtml(town)} yet, so this end of the route uses the town centre.</div>`;
+      return;
+    }
+    const chosen = parks.find(park => park.id === tvParkChoice[end]);
+    const keep = box.querySelector('.tv-parklist-rows')?.scrollTop || 0;
+    box.innerHTML = `
+      <div class="tv-parklist-hd"><span><i class="ti ti-bus"></i> ${end === 'from' ? 'Departure' : 'Arrival'} park</span><em>${tvPlural(parks.length, 'park')} · tap one, or tap it on the map</em></div>
+      <div class="tv-parklist-rows" role="listbox" aria-label="${end === 'from' ? 'Departure' : 'Arrival'} parks in ${escapeHtml(town)}">
+        ${parks.map(park => `<button type="button" role="option" aria-selected="${park === chosen}" class="tv-parkrow is-${end}${park === chosen ? ' is-chosen' : ''}" onclick="chooseTravelPark('${end}', '${escapeHtml(park.id)}')">
+          <i class="ti ${park === chosen ? 'ti-check' : 'ti-bus'}"></i>
+          <span class="tv-parkrow-name">${escapeHtml(park.name)}</span>
+          <span class="tv-parkrow-km">${park.kmFromCentre} km</span>
+        </button>`).join('')}
+      </div>
+      ${tvParkCardHtml(chosen, town)}`;
+    // Stay where the list was scrolled, unless that hides the chosen park.
+    const rows = box.querySelector('.tv-parklist-rows');
+    const row = rows.querySelector('.is-chosen');
+    rows.scrollTop = keep;
+    const top = row.offsetTop - rows.offsetTop;
+    if (top < rows.scrollTop || top + row.offsetHeight > rows.scrollTop + rows.clientHeight) rows.scrollTop = Math.max(0, top - row.offsetHeight);
   });
-  document.getElementById('tvParkHint').innerHTML = missing.length
-    ? `<i class="ti ti-info-circle"></i> No bus park is on record for ${missing.map(escapeHtml).join(' or ')} yet, so that end of the route uses the town centre.`
-    : '<i class="ti ti-hand-click"></i> Or tap a park on the map to choose it.';
 }
 
 function chooseTravelPark(end, id){
@@ -693,9 +744,70 @@ function selectTravelMode(btn){
   assessRoute();
 }
 
-function tvPinIcon(color){
-  return L.divIcon({ className:'', iconSize:[22,30], iconAnchor:[11,30], popupAnchor:[0,-28],
-    html:`<svg class="tv-route-pin" width="22" height="30" viewBox="0 0 22 30"><path d="M11 0C5 0 0 4.7 0 10.6 0 18.6 11 30 11 30s11-11.4 11-19.4C22 4.7 17 0 11 0z" fill="${color}"/><circle cx="11" cy="10.6" r="4" fill="#fff"/></svg>` });
+// Start and finish: lettered badges, the way a control-room map marks them.
+function tvEndIcon(letter, end){
+  return L.divIcon({ className:'', iconSize:[0,0], popupAnchor:[0,-16],
+    html:`<div class="tv-end is-${end}"><span>${letter}</span></div>` });
+}
+
+// A route line with a dark casing under it, so it reads on any basemap.
+function tvDrawLine(path, color, weight, options = {}){
+  L.polyline(path, { color:'#0b1420', weight: weight + 4, opacity: options.casing ?? 0.85, lineCap:'round', lineJoin:'round', interactive:false })
+    .addTo(travelMapGroup);
+  return L.polyline(path, { color, weight, opacity: 1, lineCap:'round', lineJoin:'round', ...options }).addTo(travelMapGroup);
+}
+
+// Chevrons along the selected route, pointing the way it is travelled.
+function tvDrawArrows(route){
+  if (!route.net) return;
+  const { line, cum } = route.net;
+  const total = cum[cum.length - 1];
+  const count = Math.max(3, Math.min(16, Math.round(total / 45)));
+  for (let k = 1; k <= count; k++){
+    const at = tvIndexAtKm(cum, total * k / (count + 1));
+    const a = line[Math.max(0, at - 3)], b = line[Math.min(line.length - 1, at + 3)];
+    const bearing = Math.atan2((b[1] - a[1]) * Math.cos(a[0] * Math.PI / 180), b[0] - a[0]) * 180 / Math.PI;
+    L.marker(line[at], { interactive:false, keyboard:false,
+      icon: L.divIcon({ className:'', iconSize:[0,0],
+        html:`<div class="tv-arrow" style="transform:translate(-50%,-50%) rotate(${bearing.toFixed(0)}deg)"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M2.5 9.5 7 4.5l4.5 5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>` })
+    }).addTo(travelMapGroup);
+  }
+}
+
+// ── Basemap ──────────────────────────────────────────────────
+
+function setTravelBasemap(key){
+  if (!TV_BASEMAPS[key] || !travelMap) return;
+  tvBasemap = key;
+  try { localStorage.setItem('tv-basemap', key); } catch (error) { /* private window: the choice just is not remembered */ }
+  const base = TV_BASEMAPS[key];
+  const light = document.documentElement.getAttribute('data-theme') === 'light';
+  tvBaseLayers.forEach(layer => layer.remove());
+  tvBaseLayers = base.themed
+    ? [L.tileLayer(light ? TV_LIGHT_TILE : TV_DARK_TILE, { ...TV_TILE_OPTS, maxNativeZoom: 16, maxZoom: 18 })]
+    : [L.tileLayer(base.url, { attribution: base.attribution, maxNativeZoom: base.maxNativeZoom, maxZoom: 18 })];
+  if (base.labels) tvBaseLayers.push(L.tileLayer(base.labels, { maxNativeZoom: 18, maxZoom: 18 }));
+  tvBaseLayers.forEach(layer => layer.addTo(travelMap));
+  // Town names are drawn light on a dark map and dark on a light one.
+  const dark = base.themed ? !light : base.dark;
+  document.querySelector('.tv-map-wrap').classList.toggle('is-lightmap', !dark);
+  document.querySelector('.tv-map-wrap').classList.toggle('is-darkmap', dark);
+  document.getElementById('tvBasemapName').textContent = base.label;
+  document.getElementById('tvBasemapMenu').innerHTML = Object.entries(TV_BASEMAPS).map(([name, item]) =>
+    `<button type="button" role="menuitemradio" aria-checked="${name === key}" class="tv-basemap${name === key ? ' active' : ''}" onclick="setTravelBasemap('${name}'); toggleTravelBasemaps(false)"><i class="ti ${item.icon}"></i><span>${item.label}</span>${name === key ? '<i class="ti ti-check tv-basemap-tick"></i>' : ''}</button>`).join('');
+}
+
+// The map-layer button opens and closes the list of basemaps.
+function toggleTravelBasemaps(open){
+  const box = document.getElementById('tvBasemaps');
+  const show = open ?? !box.classList.contains('is-open');
+  box.classList.toggle('is-open', show);
+  document.getElementById('tvBasemapBtn').setAttribute('aria-expanded', String(show));
+}
+
+// Called by app.js when the light/dark theme changes.
+function refreshTravelTheme(){
+  if (travelMap) setTravelBasemap(tvBasemap);
 }
 
 function fitTravelBounds(){
@@ -769,10 +881,9 @@ function renderTravelRoute(corr, refit){
   // The options not chosen, drawn underneath and clickable.
   tvRoutes.forEach((route, i) => {
     if (route === corr) return;
-    L.polyline(route.net ? route.net.line : route.waypoints.map(w => [w[0], w[1]]), { color:'#2e8fff', weight:4, opacity:0.75, dashArray:'6 8' })
+    tvDrawLine(route.net ? route.net.line : route.waypoints.map(w => [w[0], w[1]]), '#5aa9ff', 3, { dashArray:'2 9', casing: 0.55 })
       .bindTooltip(`${route.legs.length === 1 ? route.road : `via ${route.via.join(' · ')}`} — tap to compare`, { sticky:true })
-      .on('click', () => selectTravelRoute(i))
-      .addTo(travelMapGroup);
+      .on('click', () => selectTravelRoute(i));
   });
 
   const { levels, raised } = tvEffectiveLevels(corr);
@@ -781,8 +892,9 @@ function renderTravelRoute(corr, refit){
     const risk = TV_SEG_WEIGHT[levels[i]] >= TV_SEG_WEIGHT[levels[i+1]] ? levels[i] : levels[i+1];
     const path = corr.net ? corr.net.line.slice(corr.net.wpAt[i], corr.net.wpAt[i+1] + 1) : [[a[0],a[1]],[b[0],b[1]]];
     // Without a road the line is only a sketch between towns, so it is drawn broken.
-    if (path.length > 1) L.polyline(path, { color: TV_SEG_COLOR[risk], weight: 6, opacity: 0.95, lineCap:'round', dashArray: corr.net ? null : '2 10' }).addTo(travelMapGroup);
+    if (path.length > 1) tvDrawLine(path, TV_SEG_COLOR[risk], 5, corr.net ? { interactive:false } : { dashArray:'2 10', casing: 0.4, interactive:false });
   }
+  tvDrawArrows(corr);
   // Waypoints sit where the road actually passes them.
   const spot = j => corr.net ? corr.net.line[corr.net.wpAt[j]] : corr.waypoints[j].slice(0, 2);
   corr.stretches.forEach(stretch => {
@@ -823,8 +935,8 @@ function renderTravelRoute(corr, refit){
   }
 
   const wp = corr.waypoints;
-  L.marker(spot(0), { icon: tvPinIcon('#2e8fff'), zIndexOffset: 600 }).bindPopup(`<div class="popup-title">${escapeHtml(tvEndName(corr, 'from'))} · start</div>`).addTo(travelMapGroup);
-  L.marker(spot(wp.length - 1), { icon: tvPinIcon('#35d08a'), zIndexOffset: 600 }).bindPopup(`<div class="popup-title">${escapeHtml(tvEndName(corr, 'to'))} · destination</div>`).addTo(travelMapGroup);
+  L.marker(spot(0), { icon: tvEndIcon('A', 'from'), zIndexOffset: 600 }).bindPopup(`<div class="popup-title">${escapeHtml(tvEndName(corr, 'from'))} · start</div>`).addTo(travelMapGroup);
+  L.marker(spot(wp.length - 1), { icon: tvEndIcon('B', 'to'), zIndexOffset: 600 }).bindPopup(`<div class="popup-title">${escapeHtml(tvEndName(corr, 'to'))} · destination</div>`).addTo(travelMapGroup);
   if (refit) fitTravelBounds();
 }
 
@@ -892,29 +1004,86 @@ function renderTravelRating(corr, risk, label){
       : 'Road network unavailable — distance and time are straight-line estimates.'}</div>`;
 }
 
-function renderTravelHourChart(corr){
+function tvFade(hex, alpha){
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
+
+// Leave at this hour instead: everything on the page follows.
+function setTravelDepartHour(hour){
+  const h = ((Math.round(hour) % 24) + 24) % 24;
+  document.getElementById('tvTime').value = `${String(h).padStart(2, '0')}:00`;
+  if (tvCurrentCorridor) tvRenderAssessment();
+}
+
+// What leaving at the chosen hour means, and the hour that would score lowest.
+function renderTravelHourDetail(corr, curve, departHour){
+  const box = document.getElementById('tvHourDetail');
+  if (!box) return;
+  const risk = tvRouteRisk(corr, departHour);
+  const band = tvRiskBand(risk.score);
+  const arriveMin = departHour * 60 + corr.estMin;
+  const arrive = `${tv12h(Math.floor(arriveMin / 60) % 24).replace(':00', `:${String(arriveMin % 60).padStart(2, '0')}`)}${arriveMin >= 1440 ? ' next day' : ''}`;
+  let worst = departHour;
+  for (let h = 0; h <= Math.ceil(corr.estMin / 60); h++){
+    const hour = (departHour + h) % 24;
+    if (curve[hour] > curve[worst]) worst = hour;
+  }
+  // Daylight departures only: nobody is being sent out at 2 a.m.
+  let best = TV_FIRST_LIGHT, bestScore = Infinity;
+  for (let h = TV_FIRST_LIGHT; h <= 20; h++){
+    const score = tvRouteRisk(corr, h).score;
+    if (score < bestScore){ best = h; bestScore = score; }
+  }
+  box.innerHTML = `
+    <div class="tv-hour-hd"><strong>Leaving at ${tv12h(departHour)}</strong><span class="tv-risk-badge ${band.cls}">${risk.score}/100 · ${band.label}</span></div>
+    <div class="tv-hour-facts">
+      <span>On the road</span><b>${tv12h(departHour)} – ${arrive}</b>
+      <span>Risk when you set off</span><b style="color:${tvHourColor(curve[departHour])}">${curve[departHour]} of 100</b>
+      <span>Worst hour on the way</span><b style="color:${tvHourColor(curve[worst])}">${tv12h(worst)} · ${curve[worst]}</b>
+    </div>
+    <div class="tv-hour-actions">
+      <button type="button" class="tv-inline-btn" onclick="setTravelDepartHour(${departHour - 1})"><i class="ti ti-chevron-left"></i> Earlier</button>
+      <button type="button" class="tv-inline-btn" onclick="setTravelDepartHour(${departHour + 1})">Later <i class="ti ti-chevron-right"></i></button>
+      ${best !== departHour && bestScore < risk.score
+        ? `<button type="button" class="tv-inline-btn is-best" onclick="setTravelDepartHour(${best})"><i class="ti ti-clock-play"></i> Lowest risk: ${tv12h(best)} · ${bestScore}</button>`
+        : '<span class="tv-hour-best"><i class="ti ti-circle-check"></i> This is the lowest-risk daylight departure</span>'}
+    </div>`;
+}
+
+function renderTravelHourChart(corr, departHour){
   const canvas = document.getElementById('tvHourChart');
   const { curve, mentions } = tvHourlyCurve(corr);
   if (!canvas) return curve;
   const labels = Array.from({length:24}, (_,h) => [0,6,12,18,23].includes(h) ? (h===23?'11p':tvShortH(h)) : '');
+  // Hours spent on the road stand out; the rest are dimmed.
+  const onRoad = new Set();
+  for (let h = 0; h <= Math.ceil(corr.estMin / 60); h++) onRoad.add((departHour + h) % 24);
+  const fills = curve.map((value, h) => onRoad.has(h) ? tvHourColor(value) : tvFade(tvHourColor(value), 0.32));
+  const borders = curve.map((_, h) => h === departHour ? 2 : 0);
   if (tvHourChart) {
-    tvHourChart.data.datasets[0].data = curve;
-    tvHourChart.data.datasets[0].backgroundColor = curve.map(tvHourColor);
+    const set = tvHourChart.data.datasets[0];
+    set.data = curve; set.backgroundColor = fills; set.borderWidth = borders;
     tvHourChart.update();
   } else {
     tvHourChart = new Chart(canvas, {
       type:'bar',
-      data:{ labels, datasets:[{ data: curve, backgroundColor: curve.map(tvHourColor), borderRadius:3, barPercentage:0.85, categoryPercentage:0.9 }] },
+      data:{ labels, datasets:[{ data: curve, backgroundColor: fills, borderColor:'#ffffff', borderWidth: borders, borderRadius:3, barPercentage:0.9, categoryPercentage:0.94 }] },
       options:{ responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{display:false}, tooltip:{ callbacks:{ title:(it)=>tv12h(it[0].dataIndex), label:(it)=>`Relative risk ${it.raw}` } } },
+        // A tap anywhere in an hour's column picks that hour, not only on the bar.
+        interaction:{ mode:'index', intersect:false },
+        onClick:(event, elements) => { if (elements.length) setTravelDepartHour(elements[0].index); },
+        onHover:(event, elements) => { event.native.target.style.cursor = elements.length ? 'pointer' : 'default'; },
+        plugins:{ legend:{display:false}, tooltip:{ callbacks:{ title:(it)=>tv12h(it[0].dataIndex), label:(it)=>`Relative risk ${it.raw}`, footer:()=>'Tap to leave at this hour' } } },
         scales:{ x:{ grid:{display:false}, ticks:{ color:'#8a94a3', font:{size:9}, autoSkip:false, maxRotation:0 } },
                  y:{ display:false, beginAtZero:true } } }
     });
   }
   document.getElementById('tvSafeWindow').textContent = tvWindow(curve, v => v < 30);
   document.getElementById('tvPeakWindow').textContent = tvWindow(curve, v => v >= 56);
-  document.getElementById('tvEstNote').innerHTML = `<i class="ti ti-info-circle"></i> Modelled daylight/dusk pattern${mentions
+  document.getElementById('tvEstNote').innerHTML = `<i class="ti ti-info-circle"></i> Tap any hour to plan for it. Bright bars are the hours you would be on the road. Modelled daylight/dusk pattern${mentions
     ? `, raised for the times of day named in ${tvPlural(mentions, 'recent report')}` : ''} — not live per-hour data.`;
+  renderTravelHourDetail(corr, curve, departHour);
   return curve;
 }
 
@@ -939,6 +1108,11 @@ function renderTravelDepart(corr, risk, curve){
   document.getElementById('tvDepartVal').textContent = postpone ? 'Postpone if you can'
     : tooLong ? 'Break the journey overnight'
     : `Leave before ${tv12h(leaveBy)}`;
+  // Tapping the card plans for the hour it recommends.
+  const suggested = tooLong ? TV_FIRST_LIGHT : Math.max(TV_FIRST_LIGHT, leaveBy - 1);
+  box.onclick = postpone ? null : () => setTravelDepartHour(suggested);
+  box.classList.toggle('is-clickable', !postpone);
+  box.title = postpone ? '' : `Plan for a ${tv12h(suggested)} departure`;
   return { peakStart, leaveBy, postpone, tooLong, margin };
 }
 
@@ -1119,17 +1293,18 @@ function renderTravelDirections(){
     const reports = live ? live.events.filter(e => e.places.some(place => towns.some(town => town.name === place))).length : 0;
     const ahead = corr.waypoints.find((w, j) => w[3] && cum[wpAt[j]] >= step.kmTo)?.[3] || lastTown;
     const where = towns.length ? `through ${towns.map(town => escapeHtml(town.name)).join(', ')}` : `towards ${escapeHtml(ahead)}`;
+    const turn = tvTurn(step, index === 0);
     return `<li class="tv-dir is-${level}">
-      <span class="tv-dir-num">${index + 1}</span>
+      <span class="tv-dir-num" title="Step ${index + 1}"><i class="ti ${turn.icon}"></i></span>
       <span class="tv-dir-body">
-        <span class="tv-dir-road">${index === 0 ? 'Leave ' + escapeHtml(corr.parkFrom ? corr.parkFrom.name : corr.from) + ' on ' : 'Follow '}<strong>${escapeHtml(step.label || 'an unnamed road')}</strong></span>
+        <span class="tv-dir-road">${index === 0 ? 'Leave ' + escapeHtml(corr.parkFrom ? corr.parkFrom.name : corr.from) + ' on ' : turn.verb + ' '}<strong>${escapeHtml(step.label || 'an unnamed road')}</strong></span>
         <span class="tv-dir-meta">${step.km >= 10 ? Math.round(step.km) : step.km.toFixed(1)} km · ${tvDuration(Math.round(step.min))} · ${where}</span>
         <span class="tv-dir-tags"><span class="tv-dir-level">${{ low: 'Low risk', caution: 'Caution', high: 'High risk' }[level]}</span>${reports ? `<span class="tv-dir-reports">${tvPlural(reports, 'report')}</span>` : ''}<span class="tv-dir-km">km ${Math.round(step.kmFrom)}–${Math.round(step.kmTo)}</span></span>
       </span>
     </li>`;
   }).join('');
   list.innerHTML = `<ol class="tv-dirs">${rows}
-    <li class="tv-dir is-end"><span class="tv-dir-num"><i class="ti ti-flag"></i></span><span class="tv-dir-body"><span class="tv-dir-road">Arrive ${corr.parkTo ? 'at' : 'in'} <strong>${escapeHtml(tvEndName(corr, 'to'))}</strong></span><span class="tv-dir-meta">${corr.distanceKm} km · ${tvDuration(corr.estMin)} of driving</span></span></li>
+    <li class="tv-dir is-end"><span class="tv-dir-num"><i class="ti ti-flag-filled"></i></span><span class="tv-dir-body"><span class="tv-dir-road">Arrive ${corr.parkTo ? 'at' : 'in'} <strong>${escapeHtml(tvEndName(corr, 'to'))}</strong></span><span class="tv-dir-meta">${corr.distanceKm} km · ${tvDuration(corr.estMin)} of driving</span></span></li>
   </ol>`;
 }
 
@@ -1249,7 +1424,7 @@ function tvRenderAssessment(refit){
   renderTravelRoute(corr, refit);
   renderTravelRating(corr, risk, tvRoutes.length > 1 ? labels[mine] : '');
   renderTravelDirections();
-  const curve = renderTravelHourChart(corr);
+  const curve = renderTravelHourChart(corr, departHour);
   const dep = renderTravelDepart(corr, risk, curve);
   renderTravelRecs(corr, departHour, dep, risks, labels);
   renderTravelNews();
@@ -1334,14 +1509,16 @@ function initTravelView(){
   toSel.value = 'Abuja (FCT)';
   fromSel.addEventListener('change', () => { tvFillDestinations(); assessRoute(); });
   toSel.addEventListener('change', assessRoute);
-  document.getElementById('tvParkFrom').addEventListener('change', event => chooseTravelPark('from', event.target.value));
-  document.getElementById('tvParkTo').addEventListener('change', event => chooseTravelPark('to', event.target.value));
   document.getElementById('tvTime').addEventListener('change', () => { if (tvCurrentCorridor) tvRenderAssessment(); });
   const d = document.getElementById('tvDate'); if (d && !d.value) d.value = new Date().toISOString().slice(0,10);
 
-  travelMap = L.map('travelMap', { center:[9.6,7.5], zoom:7, zoomControl:true, attributionControl:true });
-  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-  L.tileLayer(isLight ? TV_LIGHT_TILE : TV_DARK_TILE, TV_TILE_OPTS).addTo(travelMap);
+  travelMap = L.map('travelMap', { center:[9.6,7.5], zoom:7, zoomControl:true, attributionControl:true, maxZoom:18 });
+  let remembered = 'canvas';
+  try { remembered = localStorage.getItem('tv-basemap') || 'canvas'; } catch (error) { /* storage blocked */ }
+  setTravelBasemap(TV_BASEMAPS[remembered] ? remembered : 'canvas');
+  // A click anywhere else, or Escape, closes the map-layer menu.
+  document.addEventListener('click', event => { if (!event.target.closest('#tvBasemaps')) toggleTravelBasemaps(false); });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') toggleTravelBasemaps(false); });
   travelMapGroup = L.layerGroup().addTo(travelMap);
 
   // Keep the reports current for as long as the tab stays open on a route.

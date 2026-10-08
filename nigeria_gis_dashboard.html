@@ -390,19 +390,6 @@
     <div class="panel-card">
       <div class="panel-card-hd"><i class="ti ti-route"></i> Plan a safe trip</div>
       <div class="filter-group">
-        <label class="filter-label">From</label>
-        <select class="filter-select" id="tvFrom"></select>
-      </div>
-      <button type="button" class="tv-swap" onclick="swapTravelEnds()" title="Swap origin and destination"><i class="ti ti-arrows-up-down"></i> Swap</button>
-      <div class="filter-group">
-        <label class="filter-label">To</label>
-        <select class="filter-select" id="tvTo"></select>
-      </div>
-      <div class="tv-row2">
-        <div class="filter-group"><label class="filter-label">Date</label><input type="date" class="filter-select" id="tvDate"></div>
-        <div class="filter-group"><label class="filter-label">Departure</label><input type="time" class="filter-select" id="tvTime" value="16:30"></div>
-      </div>
-      <div class="filter-group">
         <label class="filter-label">Travel mode</label>
         <div class="tv-modes" id="tvModes">
           <button type="button" class="tv-mode active" data-mode="Car" onclick="selectTravelMode(this)"><i class="ti ti-car"></i><span>Car</span></button>
@@ -410,16 +397,20 @@
           <button type="button" class="tv-mode" data-mode="Convoy" onclick="selectTravelMode(this)"><i class="ti ti-truck"></i><span>Convoy</span></button>
         </div>
       </div>
-      <div class="tv-parks" id="tvParksBox" hidden>
-        <div class="filter-group">
-          <label class="filter-label" id="tvParkFromLbl" for="tvParkFrom">Departure park</label>
-          <select class="filter-select" id="tvParkFrom"></select>
-        </div>
-        <div class="filter-group">
-          <label class="filter-label" id="tvParkToLbl" for="tvParkTo">Arrival park</label>
-          <select class="filter-select" id="tvParkTo"></select>
-        </div>
-        <div class="tv-park-hint" id="tvParkHint"></div>
+      <div class="filter-group">
+        <label class="filter-label">From</label>
+        <select class="filter-select" id="tvFrom"></select>
+      </div>
+      <div class="tv-parklist" id="tvParksFrom" hidden></div>
+      <button type="button" class="tv-swap" onclick="swapTravelEnds()" title="Swap origin and destination"><i class="ti ti-arrows-up-down"></i> Swap</button>
+      <div class="filter-group">
+        <label class="filter-label">To</label>
+        <select class="filter-select" id="tvTo"></select>
+      </div>
+      <div class="tv-parklist" id="tvParksTo" hidden></div>
+      <div class="tv-row2">
+        <div class="filter-group"><label class="filter-label">Date</label><input type="date" class="filter-select" id="tvDate"></div>
+        <div class="filter-group"><label class="filter-label">Departure</label><input type="time" class="filter-select" id="tvTime" value="16:30"></div>
       </div>
       <button class="apply-btn tv-assess" onclick="assessRoute()"><i class="ti ti-shield-check"></i> Find and assess routes</button>
     </div>
@@ -447,12 +438,19 @@
       </div>
       <div class="tv-map-wrap">
         <div id="travelMap"></div>
+        <div class="tv-basemaps" id="tvBasemaps">
+          <div class="tv-basemap-menu" id="tvBasemapMenu" role="menu" aria-label="Map layer"></div>
+          <button type="button" class="tv-basemap-btn" id="tvBasemapBtn" aria-haspopup="menu" aria-expanded="false" onclick="toggleTravelBasemaps()" title="Change the map layer">
+            <i class="ti ti-stack-2"></i><span>Map layer</span><em id="tvBasemapName"></em><i class="ti ti-chevron-up tv-basemap-caret"></i>
+          </button>
+        </div>
         <div class="map-legend tv-legend">
           <div class="leg-title">Route risk by segment</div>
           <div class="leg-row"><span class="tv-leg-line tv-leg-low"></span>Low risk</div>
           <div class="leg-row"><span class="tv-leg-line tv-leg-caution"></span>Caution</div>
           <div class="leg-row"><span class="tv-leg-line tv-leg-high"></span>High risk</div>
           <div class="leg-row"><span class="tv-leg-line tv-leg-alt"></span>Other route options</div>
+          <div class="leg-row"><span class="tv-leg-ends"><b>A</b><b>B</b></span>Start and destination</div>
           <div class="leg-row"><span class="tv-leg-news"></span>Town with reports</div>
           <div class="leg-row"><span class="tv-leg-park"><i class="ti ti-bus"></i></span>Bus park (bus mode)</div>
         </div>
@@ -488,6 +486,7 @@
         <span><span class="tv-ldot" style="background:var(--green)"></span> Safest <span id="tvSafeWindow">—</span></span>
         <span><span class="tv-ldot" style="background:var(--red)"></span> Peak risk <span id="tvPeakWindow">—</span></span>
       </div>
+      <div class="tv-hour-detail" id="tvHourDetail"></div>
       <div class="tv-est-note" id="tvEstNote"><i class="ti ti-info-circle"></i> Modelled estimate of the daylight/dusk risk pattern — not live per-hour data.</div>
       <div class="tv-depart" id="tvDepart">
         <div class="tv-depart-ico"><i class="ti ti-circle-check"></i></div>

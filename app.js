@@ -1241,6 +1241,7 @@ function applyTheme(theme) {
   }
 
   refreshHotspotTheme();
+  if (typeof refreshTravelTheme === 'function') refreshTravelTheme();
 
   applyThemeToCharts();
 }
