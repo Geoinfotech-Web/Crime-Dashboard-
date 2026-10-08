@@ -87,6 +87,9 @@ def _trim(data):
                 "ref": step.get("ref") or "",
                 "km": round(step["distance"] / 1000, 2),
                 "min": round(step["duration"] / 60, 1),
+                # How the road is joined: "turn"/"merge"/"roundabout"…, and which way.
+                "kind": step.get("maneuver", {}).get("type", ""),
+                "turn": step.get("maneuver", {}).get("modifier", ""),
             } for step in leg.get("steps", []) if step.get("distance")],
         } for leg in route["legs"]],
     }
