@@ -839,22 +839,8 @@ function markerClass(a){
   return'aid-marker-other';
 }
 
-let pointLayer=L.markerClusterGroup({
-  maxClusterRadius: 50,
-  spiderfyOnMaxZoom: true,
-  showCoverageOnHover: false,
-  zoomToBoundsOnClick: true,
-  iconCreateFunction: function(cluster){
-    const count = cluster.getChildCount();
-    const size = count < 10 ? 32 : count < 50 ? 38 : 44;
-    return L.divIcon({
-      html: `<div class="aid-cluster">${count}</div>`,
-      className: '',
-      iconSize: [size, size],
-      iconAnchor: [size/2, size/2]
-    });
-  }
-});
+// Aid incidents render as individual markers (no clustering).
+let pointLayer=L.layerGroup();
 function buildPoints(data){
   pointLayer.clearLayers();
   data.forEach(d=>{
