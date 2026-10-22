@@ -715,23 +715,20 @@ function updateChartsWithLiveReports(articles) {
   // "Historical" side reflects the active filter when one is applied.
   const hist = chartFilterSet || awsdData;
   const attackLabels = ['Kidnapping','Shooting/Killing','Armed attack','Assault','Security operations','Other'];
+  const ATTACK_COLORS = {
+    'Kidnapping':'#bc8cff','Shooting/Killing':'#f85149','Armed attack':'#d29922',
+    'Assault':'#58a6ff','Security operations':'#3fb950','Other':'#8b949e'
+  };
   const historicalAttackCounts = countBy(hist, classifyHistoricalAttack);
   const currentAttackCounts = countBy(articles, classifyLiveAttack);
+  // Incident-type mix: one bar per type, coloured by type (historical + live combined).
   attackDonutChart.data.labels = attackLabels;
-  attackDonutChart.data.datasets = [
-    {
-      label:'Aid worker records',
-      data:attackLabels.map(label=>historicalAttackCounts.get(label) || 0),
-      backgroundColor:'#58a6ff',
-      borderRadius:4
-    },
-    {
-      label:'Current live reports',
-      data:attackLabels.map(label=>currentAttackCounts.get(label) || 0),
-      backgroundColor:'#3fb950',
-      borderRadius:4
-    }
-  ];
+  attackDonutChart.data.datasets = [{
+    label:'Incidents',
+    data:attackLabels.map(label=>(historicalAttackCounts.get(label) || 0) + (currentAttackCounts.get(label) || 0)),
+    backgroundColor:attackLabels.map(label=>ATTACK_COLORS[label] || '#8b949e'),
+    borderRadius:4
+  }];
   attackDonutChart.update();
 }
 
@@ -838,8 +835,10 @@ function initDashboard(data) {
   loadLiveNews().catch(showNewsError);
 
 // MAP
-const MAP_HOME = { center:[9.0,8.0], zoom:6 };
-const map=L.map('map',{center:MAP_HOME.center,zoom:MAP_HOME.zoom,zoomControl:true});
+const map=L.map('map',{zoomControl:true});
+// Fit the frame to Nigeria's full extent by default.
+const NIGERIA_BOUNDS = L.latLngBounds([[4.1, 2.6], [13.95, 14.7]]);
+map.fitBounds(NIGERIA_BOUNDS, {padding:[8,8]});
 mapInstance = map;
 liveReportLayer = L.layerGroup().addTo(map);
 const initTile = document.documentElement.getAttribute('data-theme') === 'light' ? LIGHT_TILE : DARK_TILE;
@@ -1349,22 +1348,8 @@ function markerClass(a){
   return'aid-marker-other';
 }
 
-let pointLayer=L.markerClusterGroup({
-  maxClusterRadius: 50,
-  spiderfyOnMaxZoom: true,
-  showCoverageOnHover: false,
-  zoomToBoundsOnClick: true,
-  iconCreateFunction: function(cluster){
-    const count = cluster.getChildCount();
-    const size = count < 10 ? 32 : count < 50 ? 38 : 44;
-    return L.divIcon({
-      html: `<div class="aid-cluster">${count}</div>`,
-      className: '',
-      iconSize: [size, size],
-      iconAnchor: [size/2, size/2]
-    });
-  }
-});
+// Aid incidents render as individual markers (no clustering).
+let pointLayer=L.layerGroup();
 function buildPoints(data){
   pointLayer.clearLayers();
   data.forEach(d=>{
@@ -1771,7 +1756,7 @@ trendChart = new Chart(document.getElementById('trendChart'),{
 attackDonutChart = new Chart(document.getElementById('attackDonut'),{
   type:'bar',
   data:{labels:[],datasets:[]},
-  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{color:tc,boxWidth:10,font:{size:9},padding:8}}},scales:{x:{grid:{display:false},ticks:{color:tc,font:{size:9}}},y:{beginAtZero:true,grid:{color:gc},ticks:{color:tc,font:{size:9},precision:0}}}}
+  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{color:tc,font:{size:9}}},y:{beginAtZero:true,grid:{color:gc},ticks:{color:tc,font:{size:9},precision:0}}}}
 });
 
 monthBarChart = new Chart(document.getElementById('monthBar'),{
@@ -1812,7 +1797,7 @@ function resetDashboard(){
   liveReportLayer.clearLayers();
   if (userReportLayer) userReportLayer.clearLayers();
   map.closePopup();
-  map.flyTo(MAP_HOME.center, MAP_HOME.zoom, { duration: 0.8 });
+  map.flyToBounds(NIGERIA_BOUNDS, { padding: [8, 8], duration: 0.8 });
   document.getElementById('globalSearch').value = '';
   document.querySelectorAll('#liveNewsFeed .news-item.active').forEach(n => n.classList.remove('active'));
   switchReportTab('brief');
