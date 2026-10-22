@@ -1,0 +1,4 @@
+# The server (dev_server.py, route_news.py, route_roads.py) uses only the
+# Python standard library. These packages are needed only by the data-refresh
+# scripts (build_acled_history.py). See docs/DATA_SOURCES.md.
+openpyxl>=3.1
