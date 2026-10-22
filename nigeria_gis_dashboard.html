@@ -25,12 +25,12 @@
       <div class="brand-sub"><span class="live-dot"></span> <span id="dashboardSubtitle">Live intelligence · 37 states</span></div>
     </div>
     <div id="topbarHotspotInfo" class="brand-text" style="display:none">
-      <div class="brand-name brand-name-hs"><i class="ti ti-flame"></i> Hotspot Analysis</div>
-      <div class="brand-sub">Composite risk scoring across all 37 states · 2004–2026 · ACLED + AWSD + live news</div>
+      <div class="brand-name">GeoSentry <span class="brand-ng">NG</span></div>
+      <div class="brand-sub"><i class="ti ti-flame brand-sub-ico-hs"></i> Hotspot Analysis · risk scoring across 37 states · <span id="hsCoverage">2015–2026</span></div>
     </div>
     <div id="topbarTravelInfo" class="brand-text" style="display:none">
-      <div class="brand-name brand-name-tv"><i class="ti ti-route"></i> Travel Safety</div>
-      <div class="brand-sub">Route-risk advisor · any town to any town · alternative routes · live news</div>
+      <div class="brand-name">GeoSentry <span class="brand-ng">NG</span></div>
+      <div class="brand-sub"><i class="ti ti-route brand-sub-ico-tv"></i> Travel Safety · route-risk advisor · live news</div>
     </div>
   </div>
 
@@ -55,6 +55,7 @@
     <button class="nav-tab" data-view="report" onclick="navTo('report')"><i class="ti ti-broadcast"></i><span>Live Report</span></button>
   </div>
   <div class="navtabs-right">
+    <button type="button" class="reset-view-btn" id="resetViewBtn" onclick="resetDashboard()" title="Return filters, map, layers and panels to their defaults"><i class="ti ti-restore"></i><span>Reset view</span></button>
     <div class="seg-control" id="rangeControl">
       <button class="seg-btn" data-range="24h" onclick="setRange(this)">24h</button>
       <button class="seg-btn" data-range="7d" onclick="setRange(this)">7d</button>
@@ -65,46 +66,59 @@
   </div>
 </nav>
 
-<!-- ═══ KPI ROW ═══ -->
-<div class="kpi-row" id="dashKpiRow">
-  <div class="gkpi gkpi-selected" id="matchKpiCard">
-    <div class="gkpi-top"><div class="gkpi-ico blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg></div></div>
-    <div class="gkpi-label">Matching Incidents</div>
-    <div class="gkpi-value" id="matchKpi">--</div>
-    <div class="gkpi-sub" id="matchKpiSub">of -- · -- states</div>
-  </div>
-  <div class="gkpi">
-    <div class="gkpi-top"><div class="gkpi-ico red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c3.5 4.5 6 7.5 6 11a6 6 0 0 1-12 0c0-3.5 2.5-6.5 6-11z"/></svg></div><svg class="spark" id="spark-deaths" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
-    <div class="gkpi-label">Total Deaths</div>
-    <div class="gkpi-value red" id="totalDeathsKpi">--</div>
-    <div class="gkpi-delta up">↑ 4.2% vs prev</div>
-  </div>
-  <div class="gkpi">
-    <div class="gkpi-top"><div class="gkpi-ico orange"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 16.5h.01M10.3 4 3 17a2 2 0 0 0 1.7 3h14.6a2 2 0 0 0 1.7-3L13.7 4a2 2 0 0 0-3.4 0z"/></svg></div><svg class="spark" id="spark-incidents" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
-    <div class="gkpi-label">Incidents</div>
-    <div class="gkpi-value orange" id="totalIncidentsKpi">--</div>
-    <div class="gkpi-delta up">↑ 2.1% vs prev</div>
-  </div>
-  <div class="gkpi">
-    <div class="gkpi-top"><div class="gkpi-ico blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3 2.7-5 5.5-5s5.5 2 5.5 5"/><path d="M16 5.2a3 3 0 0 1 0 5.6M17 15c2 .6 3.5 2.2 3.5 4.5"/></svg></div><svg class="spark" id="spark-aid" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
-    <div class="gkpi-label">Affected Aid Workers</div>
-    <div class="gkpi-value blue" id="aidWorkersKpi">--</div>
-    <div class="gkpi-delta down">↓ 1.3% vs prev</div>
-  </div>
-  <div class="gkpi">
-    <div class="gkpi-top"><div class="gkpi-ico green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6-5.3-6-10a6 6 0 1 1 12 0c0 4.7-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg></div><svg class="spark" id="spark-states" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
-    <div class="gkpi-label">States Monitored</div>
-    <div class="gkpi-value green" id="statesKpi">--</div>
-    <div class="gkpi-sub">all states active</div>
-  </div>
-</div>
 
 <!-- ═══ MAIN LAYOUT ═══ -->
 <div class="layout">
 
-  <!-- LEFT: FILTERS & CONTROLS -->
+  <!-- KPI ROW (spans the left and centre columns) -->
+  <div class="kpi-row" id="dashKpiRow">
+    <div class="gkpi" id="matchKpiCard">
+      <div class="gkpi-top"><div class="gkpi-ico blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg></div></div>
+      <div class="gkpi-label">Aid Worker Incidents</div>
+      <div class="gkpi-value" id="matchKpi">--</div>
+      <div class="gkpi-sub" id="matchKpiSub">of -- · -- states</div>
+    </div>
+    <div class="gkpi" id="deathsKpiCard">
+      <div class="gkpi-top"><div class="gkpi-ico red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c3.5 4.5 6 7.5 6 11a6 6 0 0 1-12 0c0-3.5 2.5-6.5 6-11z"/></svg></div><svg class="spark" id="spark-deaths" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
+      <div class="gkpi-label" id="deathsKpiLabel">Total Deaths</div>
+      <div class="gkpi-value red" id="totalDeathsKpi">--</div>
+      <div class="gkpi-delta" id="deathsKpiDelta">&nbsp;</div>
+    </div>
+    <div class="gkpi" id="incidentsKpiCard">
+      <div class="gkpi-top"><div class="gkpi-ico orange"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 16.5h.01M10.3 4 3 17a2 2 0 0 0 1.7 3h14.6a2 2 0 0 0 1.7-3L13.7 4a2 2 0 0 0-3.4 0z"/></svg></div><svg class="spark" id="spark-incidents" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
+      <div class="gkpi-label" id="incidentsKpiLabel">Incidents</div>
+      <div class="gkpi-value orange" id="totalIncidentsKpi">--</div>
+      <div class="gkpi-delta" id="incidentsKpiDelta">&nbsp;</div>
+    </div>
+    <div class="gkpi">
+      <div class="gkpi-top"><div class="gkpi-ico blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3 2.7-5 5.5-5s5.5 2 5.5 5"/><path d="M16 5.2a3 3 0 0 1 0 5.6M17 15c2 .6 3.5 2.2 3.5 4.5"/></svg></div><svg class="spark" id="spark-aid" viewBox="0 0 120 34" preserveAspectRatio="none"></svg></div>
+      <div class="gkpi-label">Affected Aid Workers</div>
+      <div class="gkpi-value blue" id="aidWorkersKpi">--</div>
+      <div class="gkpi-sub" id="aidKpiSub">AWSD records</div>
+    </div>
+  </div>
+
+  <!-- LEFT: LIVE INTELLIGENCE, then FILTERS & CONTROLS -->
   <aside class="left-panel">
-    <div class="panel-card">
+    <div class="panel-card panel-card-flex intel-card">
+      <div class="panel-card-hd"><i class="ti ti-broadcast"></i> Live Intelligence</div>
+      <div class="lr-tabs" role="tablist">
+        <button class="lr-tab active" role="tab" aria-selected="true" data-lrtab="brief" onclick="switchReportTab('brief')">Briefing</button>
+        <button class="lr-tab" role="tab" aria-selected="false" data-lrtab="news" onclick="switchReportTab('news')">News</button>
+        <button class="lr-tab" role="tab" aria-selected="false" data-lrtab="log" onclick="switchReportTab('log')">Aid log</button>
+      </div>
+      <div class="lr-pane" id="lrPaneBrief">
+        <div class="brief" id="briefBody"><div class="live-news-status">Preparing the briefing…</div></div>
+      </div>
+      <div class="lr-pane" id="lrPaneNews" style="display:none">
+        <div class="live-news-status" id="liveNewsStatus">Loading current reports…</div>
+        <div class="incident-feed live-news-feed" id="liveNewsFeed"></div>
+      </div>
+      <div class="lr-pane" id="lrPaneLog" style="display:none">
+        <div class="incident-feed" id="incidentFeed"></div>
+      </div>
+    </div>
+    <div class="panel-card filters-card">
       <div class="panel-card-hd"><i class="ti ti-adjustments-horizontal"></i> Filters &amp; Controls</div>
 
       <div class="filter-group">
@@ -123,6 +137,8 @@
         <select class="filter-select" id="yearFilter">
           <option value="2015+">2015 – Present</option>
           <option value="2022+">2022 – Present</option>
+          <option value="2025+">2025 – Present</option>
+          <option value="2022-2024">2022 – 2024</option>
           <option value="2019-2021">2019 – 2021</option>
           <option value="2015-2018">2015 – 2018</option>
         </select>
@@ -159,113 +175,137 @@
 
   <!-- CENTER: MAP -->
   <section class="map-center">
-    <div class="panel-hd map-hd"><span><i class="ti ti-map-2"></i> Incident Intensity Map</span><span class="map-hd-right"><span class="map-hd-note" id="mapCountNote">Showing geolocated incidents</span><button class="map-max-btn" onclick="toggleMapMax(this)" title="Maximize map"><i class="ti ti-maximize"></i></button></span></div>
+    <div class="panel-hd map-hd"><span><i class="ti ti-map-2"></i> Incident Intensity Map</span><span class="map-hd-right"><span class="seg-control map-metric" id="mapMetric" role="group" aria-label="Bubble size shows"><button type="button" class="seg-btn active" data-metric="deaths" aria-pressed="true" onclick="setDashMetric('deaths')">Deaths</button><button type="button" class="seg-btn" data-metric="incidents" aria-pressed="false" onclick="setDashMetric('incidents')">Incidents</button></span><span class="map-hd-note" id="mapCountNote">Showing geolocated incidents</span><button class="map-max-btn" onclick="toggleMapMax(this)" title="Maximize map"><i class="ti ti-maximize"></i></button></span></div>
     <div class="map-wrap">
       <div class="info-pill" id="infoPill">Click any marker for incident details · scroll to zoom</div>
       <div class="map-layers-panel" id="mapLayersPanel">
         <button class="mlp-head" id="mlpToggle" onclick="toggleLayersPanel()" title="Map layers">
           <svg class="mlp-head-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 8l10 5 10-5-10-5z"/><path d="M2 13l10 5 10-5"/></svg>
-          <span>Layers</span><span class="mlp-count" id="mlpCount">1 on</span>
+          <span>Layers</span><span class="mlp-count" id="mlpCount">3 on</span>
           <svg class="mlp-caret" id="mlpCaret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
         </button>
         <div class="mlp-body" id="mlpBody">
-          <button class="toggle-btn mlp-row" data-layer="deaths"><span class="mlp-dot mlp-dot-deaths"></span><span class="mlp-name">Total deaths (ACLED)</span><span class="mlp-switch"></span></button>
-          <button class="toggle-btn mlp-row" data-layer="bubbles"><span class="mlp-dot mlp-dot-death"></span><span class="mlp-name">Aid incidents by state</span><span class="mlp-switch"></span></button>
-          <button class="toggle-btn mlp-row active" data-layer="points"><span class="mlp-dot mlp-dot-aid"></span><span class="mlp-name">Aid incidents</span><span class="mlp-switch"></span></button>
-          <button class="toggle-btn mlp-row" data-layer="heat"><span class="mlp-dot mlp-dot-heat"></span><span class="mlp-name">Density scatter</span><span class="mlp-switch"></span></button>
+          <div class="mlp-group">Security data</div>
+          <button class="toggle-btn mlp-row active" data-layer="acled"><span class="mlp-dot mlp-dot-death"></span><span class="mlp-name">Deaths / incidents bubbles</span><span class="mlp-switch"></span></button>
+          <button class="toggle-btn mlp-row active" data-layer="rising"><span class="mlp-dot mlp-dot-rise"></span><span class="mlp-name">Rising now</span><span class="mlp-switch"></span></button>
+          <button class="toggle-btn mlp-row" data-layer="deaths"><span class="mlp-dot mlp-dot-deaths"></span><span class="mlp-name">State shading</span><span class="mlp-switch"></span></button>
+          <div class="mlp-group">Live</div>
+          <button class="toggle-btn mlp-row active" data-layer="live"><span class="mlp-dot mlp-dot-live"></span><span class="mlp-name">News incidents (24h)</span><span class="mlp-switch"></span></button>
+          <div class="mlp-group">Aid workers</div>
+          <button class="toggle-btn mlp-row" data-layer="points"><span class="mlp-dot mlp-dot-aid"></span><span class="mlp-name">Aid worker incidents</span><span class="mlp-switch"></span></button>
+          <button class="toggle-btn mlp-row" data-layer="bubbles"><span class="mlp-dot mlp-dot-aidstate"></span><span class="mlp-name">Aid incidents by state</span><span class="mlp-switch"></span></button>
+          <div class="mlp-group">Reference</div>
+          <button class="toggle-btn mlp-row" data-layer="lgaLines"><span class="mlp-dot mlp-dot-lga"></span><span class="mlp-name">LGA boundaries</span><span class="mlp-switch"></span></button>
+          <button class="toggle-btn mlp-row" data-layer="displaced"><span class="mlp-dot mlp-dot-idp"></span><span class="mlp-name">Displaced people (IOM)</span><span class="mlp-switch"></span></button>
           <button class="toggle-btn mlp-row" data-layer="checkpoints"><span class="mlp-dot mlp-dot-cp"></span><span class="mlp-name">Checkpoints</span><span class="mlp-switch"></span></button>
+        </div>
+      </div>
+      <div class="map-legend-panel" id="mapLegendPanel">
+        <button type="button" class="mlg-head" id="mlgToggle" onclick="toggleLegendPanel()" aria-expanded="true" aria-controls="mapLegend" title="Show or hide the legend">
+          <i class="ti ti-stack-2"></i><span>Legend</span>
+          <svg class="mlp-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div id="mapLegend" class="mlg-body">
+          <div class="leg-section" data-legend="acled">
+            <div class="leg-title" id="legAcledTitle">Deaths by state (ACLED)</div>
+            <div class="leg-bubbles" id="legAcledScale"></div>
+            <div class="leg-heatbar"><span>Lower</span><i></i><span>Higher</span></div>
+            <div class="leg-note">Size and colour both show the value. Click a bubble to focus a state.</div>
+          </div>
+          <div class="leg-section" data-legend="lgaFocus">
+            <div class="leg-title" id="legLgaTitle">Deaths by LGA</div>
+            <div id="legLgaRows"></div>
+          </div>
+          <div class="leg-section" data-legend="rising">
+            <div class="leg-title">Rising now (LGAs)</div>
+            <div class="leg-row"><span class="rise-pin lvl-sharp leg-pin"><i class="ti ti-trending-up"></i></span>Sharp rise: 4× usual or more</div>
+            <div class="leg-row"><span class="rise-pin lvl-rising leg-pin"><i class="ti ti-trending-up"></i></span>Rising: 2.5× usual or more</div>
+            <div class="leg-note">Last 3 full months vs the year before</div>
+          </div>
+          <div class="leg-section" data-legend="live">
+            <div class="leg-title">News incidents (24h)</div>
+            <div class="leg-row"><span class="news-pin t-killing"></span>Killing</div>
+            <div class="leg-row"><span class="news-pin t-kidnap"></span>Kidnapping</div>
+            <div class="leg-row"><span class="news-pin t-attack"></span>Armed attack</div>
+            <div class="leg-row"><span class="news-pin t-other"></span>Other incident</div>
+            <div class="leg-row"><span class="news-pin t-other trust-ring-corroborated"></span>Green ring: corroborated</div>
+          </div>
+          <div class="leg-section" data-legend="deaths">
+            <div class="leg-title" id="legShadeTitle">Deaths by state (ACLED)</div>
+            <div id="legShadeRows"></div>
+          </div>
+          <div class="leg-section" data-legend="bubbles">
+            <div class="leg-title">Aid incidents by state (filtered)</div>
+            <div class="leg-row"><span class="leg-swatch" style="background:#e0533d"></span>Highest</div>
+            <div class="leg-row"><span class="leg-swatch" style="background:#f5b27a"></span>High</div>
+            <div class="leg-row"><span class="leg-swatch" style="background:#e8e8e8"></span>Medium</div>
+            <div class="leg-row"><span class="leg-swatch" style="background:#9db7d6"></span>Low</div>
+            <div class="leg-row"><span class="leg-swatch" style="background:#2a3344"></span>None</div>
+          </div>
+          <div class="leg-section" data-legend="points">
+            <div class="leg-title">Aid Worker Incidents</div>
+            <div class="leg-row"><div class="legend-dot legend-dot-kidnap"></div>Kidnapping</div>
+            <div class="leg-row"><div class="legend-dot legend-dot-shooting"></div>Shooting/Killing</div>
+            <div class="leg-row"><div class="legend-dot legend-dot-assault"></div>Assault/Other</div>
+          </div>
+          <div class="leg-section" data-legend="displaced">
+            <div class="leg-title">Displaced people by LGA (IOM)</div>
+            <div class="leg-row"><span class="leg-swatch" style="background:#4f2a99"></span>&gt; 100,000</div>
+            <div class="leg-row"><span class="leg-swatch" style="background:#7c4dd6"></span>50,000 – 100,000</div>
+            <div class="leg-row"><span class="leg-swatch" style="background:#a477f5"></span>20,000 – 50,000</div>
+            <div class="leg-row"><span class="leg-swatch" style="background:#c9a8ff"></span>5,000 – 20,000</div>
+            <div class="leg-row"><span class="leg-swatch" style="background:#e9dcff"></span>&le; 5,000</div>
+            <div class="leg-note">Not assessed in the south</div>
+          </div>
+          <div class="leg-section" data-legend="lgaLines">
+            <div class="leg-title">LGA boundaries</div>
+            <div class="leg-row"><span class="leg-line"></span>Local government area</div>
+          </div>
+          <div class="leg-section" data-legend="checkpoints">
+            <div class="leg-title">Checkpoints</div>
+            <div class="leg-row"><div class="cp-legend cp-police-leg"></div>Police</div>
+            <div class="leg-row"><div class="cp-legend cp-military-leg"></div>Military</div>
+            <div class="leg-row"><div class="cp-legend cp-joint-leg"></div>Joint</div>
+            <div class="leg-row"><div class="cp-legend cp-customs-leg"></div>Customs</div>
+          </div>
+          <div class="leg-empty" id="legEmpty" hidden>Turn on a layer to see its legend.</div>
         </div>
       </div>
       <div id="map"></div>
     </div>
+    <div class="map-source" id="mapSource"></div>
     <div class="time-slider-bar">
       <button class="ts-play" id="tsPlay" onclick="toggleTimePlay()" title="Play through years">
         <svg class="ts-play-ico" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg>
       </button>
-      <span class="ts-year ts-year-min">2004</span>
-      <input type="range" id="timeSlider" class="ts-range" min="2004" max="2026" value="2026" step="1" oninput="onTimeSlider(this.value)">
-      <span class="ts-year ts-year-max">2026</span>
+      <span class="ts-year ts-year-min" id="tsMin">2015</span>
+      <input type="range" id="timeSlider" class="ts-range" min="2015" max="2026" value="2026" step="1" oninput="onTimeSlider(this.value)">
+      <span class="ts-year ts-year-max" id="tsMax">2026</span>
       <span class="ts-current" id="tsCurrent">All years</span>
     </div>
   </section>
 
-  <!-- RIGHT: LIVE REPORTS -->
-  <aside class="right-panel">
-    <div class="panel-card panel-card-flex">
-      <div class="panel-card-hd"><i class="ti ti-broadcast"></i> Live Reports</div>
-      <div class="lr-tabs">
-        <button class="lr-tab active" data-lrtab="news" onclick="switchReportTab('news')">Regional news</button>
-        <button class="lr-tab" data-lrtab="log" onclick="switchReportTab('log')">Aid worker log</button>
-      </div>
-      <div class="lr-pane" id="lrPaneNews">
-        <div class="live-news-status" id="liveNewsStatus">Loading current reports…</div>
-        <div class="incident-feed live-news-feed" id="liveNewsFeed"></div>
-      </div>
-      <div class="lr-pane" id="lrPaneLog" style="display:none">
-        <div class="incident-feed" id="incidentFeed"></div>
-      </div>
+  <!-- RIGHT: CHARTS -->
+  <aside class="right-panel charts-panel" aria-label="Charts">
+    <div class="chart-card">
+      <div class="chart-title"><i class="ti ti-chart-line"></i> <span id="trendTitle">Deaths and incidents by year</span></div>
+      <div class="chart-frame"><canvas id="trendChart" role="img" aria-label="ACLED deaths and incidents by year"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title"><i class="ti ti-chart-donut-3"></i> Incident types — aid records vs live news</div>
+      <div class="chart-frame"><canvas id="attackDonut" role="img" aria-label="Incident type comparison"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title"><i class="ti ti-chart-bar"></i> <span id="stateBarsTitle">Top states — deaths</span></div>
+      <div class="chart-frame chart-frame-bars"><div id="stateRankBars"></div></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title"><i class="ti ti-chart-histogram"></i> <span id="monthTitle">Incidents by month</span></div>
+      <div class="chart-frame"><canvas id="monthBar" role="img" aria-label="Incident volume by month"></canvas></div>
     </div>
   </aside>
 </div>
 
-<!-- ═══ BOTTOM CHARTS ═══ -->
-<div class="charts-row">
-  <div class="chart-card legend-card">
-    <div class="chart-title"><i class="ti ti-stack-2"></i> Map legend</div>
-    <div id="mapLegend" class="legend-inline">
-      <div class="leg-section" data-legend="deaths">
-        <div class="leg-title">Total deaths by state (ACLED)</div>
-        <div class="leg-row"><span class="leg-swatch" style="background:#7a0a0e"></span>&gt; 2,000</div>
-        <div class="leg-row"><span class="leg-swatch" style="background:#b11419"></span>1,000 – 2,000</div>
-        <div class="leg-row"><span class="leg-swatch" style="background:#e23b36"></span>500 – 1,000</div>
-        <div class="leg-row"><span class="leg-swatch" style="background:#ff5a5f"></span>200 – 500</div>
-        <div class="leg-row"><span class="leg-swatch" style="background:#ff9ea0"></span>&lt; 200</div>
-        <div class="leg-row"><span class="leg-swatch" style="background:#2a3344"></span>No data</div>
-      </div>
-      <div class="leg-section" data-legend="bubbles">
-        <div class="leg-title">Aid incidents by state (filtered)</div>
-        <div class="leg-row"><span class="leg-swatch" style="background:#7a0a0e"></span>Highest</div>
-        <div class="leg-row"><span class="leg-swatch" style="background:#b11419"></span>High</div>
-        <div class="leg-row"><span class="leg-swatch" style="background:#e23b36"></span>Medium</div>
-        <div class="leg-row"><span class="leg-swatch" style="background:#ff5a5f"></span>Low</div>
-        <div class="leg-row"><span class="leg-swatch" style="background:#2a3344"></span>None</div>
-      </div>
-      <div class="leg-section" data-legend="points">
-        <div class="leg-title">Aid Worker Incidents</div>
-        <div class="leg-row"><div class="legend-dot legend-dot-kidnap"></div>Kidnapping</div>
-        <div class="leg-row"><div class="legend-dot legend-dot-shooting"></div>Shooting/Killing</div>
-        <div class="leg-row"><div class="legend-dot legend-dot-assault"></div>Assault/Other</div>
-      </div>
-      <div class="leg-section" data-legend="heat">
-        <div class="leg-title">Density Scatter</div>
-        <div class="leg-row"><span class="leg-heat-swatch"></span>Incident density</div>
-      </div>
-      <div class="leg-section" data-legend="checkpoints">
-        <div class="leg-title">Checkpoints</div>
-        <div class="leg-row"><div class="cp-legend cp-police-leg"></div>Police</div>
-        <div class="leg-row"><div class="cp-legend cp-military-leg"></div>Military</div>
-        <div class="leg-row"><div class="cp-legend cp-joint-leg"></div>Joint</div>
-        <div class="leg-row"><div class="cp-legend cp-customs-leg"></div>Customs</div>
-      </div>
-    </div>
-  </div>
-  <div class="chart-card">
-    <div class="chart-title"><i class="ti ti-chart-line"></i> Historical vs live trend</div>
-    <div class="chart-frame"><canvas id="trendChart" role="img" aria-label="Historical incidents vs current live reports by year"></canvas></div>
-  </div>
-  <div class="chart-card">
-    <div class="chart-title"><i class="ti ti-chart-donut-3"></i> Incident type mix</div>
-    <div class="chart-frame"><canvas id="attackDonut" role="img" aria-label="Incident type comparison"></canvas></div>
-  </div>
-  <div class="chart-card">
-    <div class="chart-title"><i class="ti ti-chart-bar"></i> Top states — aid incidents</div>
-    <div class="chart-frame chart-frame-bars"><div id="stateRankBars"></div></div>
-  </div>
-  <div class="chart-card">
-    <div class="chart-title"><i class="ti ti-chart-histogram"></i> Incident volume by month</div>
-    <div class="chart-frame"><canvas id="monthBar" role="img" aria-label="Incident volume by month"></canvas></div>
-  </div>
-</div>
 
 <!-- Hidden legacy stubs: still written to by app.js / live_report.js -->
 <div id="legacyStubs" hidden aria-hidden="true">
@@ -335,8 +375,17 @@
 
         <div class="hs-pane" data-pane="trend">
           <div class="hs-chart-block hs-chart-fill">
-            <div class="hs-block-head"><i class="ti ti-chart-line"></i> Aid worker incidents by year &mdash; top 3 states</div>
+            <div class="hs-block-head"><i class="ti ti-chart-line"></i> Deaths by year (ACLED) &mdash; top 3 states</div>
             <div class="hs-chart-frame"><canvas id="hsTrendChart"></canvas></div>
+          </div>
+        </div>
+
+        <div class="hs-pane" data-pane="seasons">
+          <div class="hs-chart-block hs-season-block">
+            <div class="hs-block-head"><i class="ti ti-calendar-stats"></i> Seasonal pattern &mdash; incidents by month</div>
+            <p class="hs-season-help" id="hsSeasonHelp"></p>
+            <div class="hs-season-wrap"><table class="hs-season" id="hsSeasonTable"></table></div>
+            <div class="hs-season-key"><span>Quieter than usual</span><span class="hs-season-ramp"></span><span>Busier than usual</span></div>
           </div>
         </div>
 
@@ -517,6 +566,7 @@
 </div>
 
 <script src="app.js"></script>
+<script src="insights.js"></script>
 <script src="hotspot.js"></script>
 <script src="travel_safety.js"></script>
 
@@ -725,6 +775,7 @@
 </div>
 
 <script src="live_report.js"></script>
+<div class="toast-host" id="toastHost" aria-live="polite"></div>
 </body>
 </html>
 

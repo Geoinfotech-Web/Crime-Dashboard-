@@ -2,8 +2,10 @@
 //  HOTSPOT ANALYSIS
 //
 //  The composite risk index is built from two kinds of input:
-//    • the incident database (dashboard_data.json) — ACLED deaths and
-//      incidents per state, plus the AWSD aid-worker records;
+//    • the incident database — ACLED deaths and incidents per state over
+//      the last three years (acled_history.json; the stored totals in
+//      dashboard_data.json if that file is missing), plus the AWSD
+//      aid-worker records;
 //    • current signals — the live news feed (/api/live-news) and the
 //      citizen reports submitted through Live Report (/api/reports).
 //
@@ -22,12 +24,13 @@ const HS_WEIGHT_LABELS = [
 ];
 
 const HS_LEVELS = [
-  { min: 85, key: 'critical', label: 'Critical', color: '#ff5a5f' },
-  { min: 75, key: 'severe',   label: 'Severe',   color: '#ff7a45' },
-  { min: 60, key: 'high',     label: 'High',     color: '#f5a623' },
-  { min: 40, key: 'elevated', label: 'Elevated', color: '#e3b341' },
-  { min: 20, key: 'moderate', label: 'Moderate', color: '#4fb8a8' },
-  { min: 0,  key: 'low',      label: 'Low',      color: '#35d08a' }
+  // Colours match .hs-lv-* in styles.css: the page-wide intensity scale.
+  { min: 85, key: 'critical', label: 'Critical', color: '#e0533d' },
+  { min: 75, key: 'severe',   label: 'Severe',   color: '#ec8456' },
+  { min: 60, key: 'high',     label: 'High',     color: '#f5b27a' },
+  { min: 40, key: 'elevated', label: 'Elevated', color: '#d9d4cc' },
+  { min: 20, key: 'moderate', label: 'Moderate', color: '#9db7d6' },
+  { min: 0,  key: 'low',      label: 'Low',      color: '#5f8cc8' }
 ];
 
 // A headline about an attack says more about risk than one about a policy
@@ -40,11 +43,9 @@ const HS_REPORT_WEIGHT = { Low: 0.5, Medium: 1, High: 1.5, Critical: 2 };
 const HS_REPORT_WINDOW_DAYS = 30;
 const HS_NIGERIA_BOUNDS = [[4.2, 2.7], [13.9, 14.7]];
 
-// The density surface runs green (low) through amber to red (critical), the
-// same colours the risk levels use everywhere else on the page.
-const HS_RAMP = [
-  [0, '#35d08a'], [40, '#e3b341'], [60, '#f5a623'], [75, '#ff7a45'], [90, '#ff5a5f'], [100, '#ff5a5f']
-];
+// The density surface uses the page-wide intensity scale (HEAT_STOPS in
+// app.js): blue for low, neutral in the middle, red for critical.
+const HS_RAMP = HEAT_STOPS.map(([t, hex]) => [t * 100, hex]);
 // Kernel density surface: every state is a Gaussian bump as tall as its score.
 // A point takes the tallest bump over it rather than their sum, so a cluster
 // of small moderate states never reads hotter than any one of them scores.
@@ -58,7 +59,7 @@ const HS_MEDIUM = {
 };
 const HS_PANEL_TABS = [
   ['risk', 'ti-chart-bar', 'Risk'], ['actors', 'ti-users', 'Actors'], ['trend', 'ti-chart-line', 'Trend'],
-  ['live', 'ti-broadcast', 'Live signals'], ['ranking', 'ti-list-numbers', 'Ranking']
+  ['seasons', 'ti-calendar-stats', 'Seasons'], ['live', 'ti-broadcast', 'Live signals'], ['ranking', 'ti-list-numbers', 'Ranking']
 ];
 
 const HS_ZONES = {
@@ -262,9 +263,21 @@ function computeHotspots() {
   hsState.live = live;
   const liveWeightOf = s => live.byState.get(s.state)?.weight || 0;
 
+  // Deaths and incidents are scored on recent years when the history is loaded,
+  // on a square-root scale: one state (Borno) has several times the deaths of
+  // any other, and on a straight scale every other state would read as low risk.
+  const deathsOf = s => s.recentDeaths ?? s.deaths;
+  const incidentsOf = s => s.recentIncidents ?? s.incidents;
+  const scale = acledHistory ? Math.sqrt : (share => share);
+  if (acledHistory) {
+    const span = `${acledHistory.riskFrom}–${String(acledHistory.meta.lastYear).slice(2)}`;
+    HS_WEIGHT_LABELS[0][1] = `Deaths ${span}`;
+    HS_WEIGHT_LABELS[1][1] = `Incidents ${span}`;
+  }
+
   const max = {
-    deaths:    Math.max(...stateData.map(s => s.deaths), 1),
-    incidents: Math.max(...stateData.map(s => s.incidents), 1),
+    deaths:    Math.max(...stateData.map(deathsOf), 1),
+    incidents: Math.max(...stateData.map(incidentsOf), 1),
     aid:       Math.max(...stateData.map(s => awsdByState.get(s.state)?.count || 0), 1),
     affected:  Math.max(...stateData.map(s => awsdByState.get(s.state)?.affected || 0), 1),
     live:      Math.max(...stateData.map(liveWeightOf), 0)
@@ -276,8 +289,8 @@ function computeHotspots() {
     const awsd = awsdByState.get(s.state) || { count: 0, affected: 0, records: [] };
     const signals = live.byState.get(s.state) || { weight: 0, articles: [], reports: [], actors: {} };
     const parts = {
-      deaths:    s.deaths / max.deaths,
-      incidents: s.incidents / max.incidents,
+      deaths:    scale(deathsOf(s) / max.deaths),
+      incidents: scale(incidentsOf(s) / max.incidents),
       aid:       awsd.count / max.aid,
       affected:  awsd.affected / max.affected,
       live:      max.live > 0 ? signals.weight / max.live : 0
@@ -626,7 +639,7 @@ function renderHsCharts(hotspots) {
   document.getElementById('hsRiskBars').innerHTML = hotspots.slice(0, 10).map(s => `
     <div class="hs-bar-row" onclick="hsOpenState('${escapeHtml(s.state)}')">
       <span class="hs-bar-name">${escapeHtml(hsShortName(s.state))}</span>
-      <span class="hs-bar-track"><span class="hs-bar-fill" style="width:${s.composite}%"></span></span>
+      <span class="hs-bar-track"><span class="hs-bar-fill" style="width:${s.composite}%;background:${hsRampColor(s.composite)}"></span></span>
       <span class="hs-bar-val">${s.composite}</span>
     </div>`).join('');
 
@@ -656,11 +669,11 @@ function renderHsCharts(hotspots) {
   renderHsTrendChart(hotspots);
 }
 
-// ③ Aid-worker incidents by year — top 3
+// ③ ACLED deaths by year — top 3 (aid worker incidents if the history file is missing)
 function renderHsTrendChart(hotspots) {
   if (hsState.panelTab !== 'trend') return;       // drawn when its tab is opened
   const { tc, gc } = getChartThemeColors();
-  const years = [...new Set(awsdData.map(r => r.year))].sort((a, b) => a - b);
+  const years = acledHistory ? histYearLabels() : [...new Set(awsdData.map(r => r.year))].sort((a, b) => a - b);
   const palette = ['#ff5a5f', '#f5a623', '#2e8fff'];
   const existing = Chart.getChart('hsTrendChart');
   if (existing) existing.destroy();
@@ -673,7 +686,7 @@ function renderHsTrendChart(hotspots) {
         s.awsdRecords.forEach(r => perYear.set(r.year, (perYear.get(r.year) || 0) + 1));
         return {
           label: hsShortName(s.state),
-          data: years.map(y => perYear.get(y) || 0),
+          data: acledHistory ? histYearly(s.state, 'fatalities') : years.map(y => perYear.get(y) || 0),
           borderColor: palette[i], backgroundColor: palette[i] + '1f',
           borderWidth: 2, fill: true, tension: 0.3, pointRadius: 0, pointHoverRadius: 4
         };
@@ -684,11 +697,53 @@ function renderHsTrendChart(hotspots) {
       interaction: { mode: 'index', intersect: false },
       plugins: { legend: { position: 'bottom', labels: { color: tc, font: { size: 10 }, boxWidth: 10, boxHeight: 10, padding: 10 } } },
       scales: {
-        x: { grid: { display: false }, ticks: { color: tc, font: { size: 10 }, maxTicksLimit: 7 } },
+        x: { grid: { display: false }, ticks: { color: tc, font: { size: 10 }, maxTicksLimit: 12 } },
         y: { beginAtZero: true, grid: { color: gc }, ticks: { color: tc, font: { size: 10 }, precision: 0 } }
       }
     }
   });
+}
+
+// ④ Seasonal calendar: each state's months against its own average month.
+// Blue is quieter than usual, red busier; the current month is outlined.
+function hsSeasonColor(index) {
+  const stops = [[0.5, [59, 111, 182]], [0.8, [157, 183, 214]], [1, [232, 232, 232]], [1.25, [245, 178, 122]], [1.6, [224, 83, 61]]];
+  const v = Math.max(stops[0][0], Math.min(stops[stops.length - 1][0], index));
+  for (let i = 1; i < stops.length; i++) {
+    const [x1, c1] = stops[i - 1], [x2, c2] = stops[i];
+    if (v <= x2) {
+      const t = (v - x1) / (x2 - x1);
+      return `rgb(${c1.map((c, k) => Math.round(c + (c2[k] - c) * t)).join(',')})`;
+    }
+  }
+  return 'rgb(224,83,61)';
+}
+
+function renderHsSeasons(hotspots) {
+  if (hsState.panelTab !== 'seasons' || !hotspots) return;
+  const table = document.getElementById('hsSeasonTable');
+  const help = document.getElementById('hsSeasonHelp');
+  if (!acledHistory) { help.textContent = 'The seasonal pattern needs the ACLED history file.'; table.innerHTML = ''; return; }
+  const now = new Date().getMonth();
+  help.innerHTML = `How each month usually compares with a state's average month, ${escapeHtml(seasonalYears())}. Use it to plan around the busier months; states with few incidents swing more and are shown fainter. Click a state for its full profile.`;
+  const { firstYear, lastYear, lastMonth } = acledHistory.meta;
+  const toYear = lastMonth < 12 ? lastYear - 1 : lastYear;
+  const row = (name, label, index, cls, faint) => `<tr class="${cls}"${faint ? ' style="opacity:.55"' : ''}>
+    <td class="hs-season-name"${name ? ` onclick="hsOpenState('${escapeHtml(name)}')"` : ''}>${escapeHtml(label)}</td>
+    ${index.map((v, m) => {
+      const pct = Math.round((v - 1) * 100);
+      const text = `${MONTH_NAMES[m]}: ${pct === 0 ? 'about average' : `${Math.abs(pct)}% ${pct > 0 ? 'above' : 'below'} average`}`;
+      return `<td class="${m === now ? 'is-now' : ''}" style="background:${hsSeasonColor(v)}" title="${escapeHtml(`${label} · ${text}`)}" aria-label="${escapeHtml(text)}">${pct > 0 ? '+' : ''}${pct}</td>`;
+    }).join('')}</tr>`;
+  const national = seasonalIndex(null);
+  const rows = hotspots.map(s => {
+    const index = seasonalIndex(s.state);
+    if (!index) return '';
+    const total = histTotal(s.state, 'events', firstYear, toYear);
+    return row(s.state, hsShortName(s.state), index, '', total < 120);
+  }).join('');
+  table.innerHTML = `<thead><tr><th></th>${MONTH_LABELS.map((m, i) => `<th class="${i === now ? 'is-now' : ''}">${m}</th>`).join('')}</tr></thead>
+    <tbody>${national ? row(null, 'All Nigeria', national, 'is-national', false) : ''}${rows}</tbody>`;
 }
 
 // ── State, local-government and community news ──────────────
@@ -1052,6 +1107,7 @@ function hsSetPanelTab(tab) {
   renderHsPanelTabs();
   // A chart drawn while its tab was hidden has no size; draw it now.
   if (tab === 'trend') renderHsTrendChart(cachedHotspots);
+  if (tab === 'seasons') renderHsSeasons(cachedHotspots);
   if (tab === 'live') renderHsLive(cachedHotspots);
   if (tab === 'state') hsRenderStatePanel();
 }
@@ -1159,8 +1215,8 @@ function hsRenderStatePanel() {
   const drivers = HS_WEIGHT_LABELS.filter(([key]) => weights[key] > 0).map(([key, label]) => `
     <div class="hs-driver">
       <span class="hs-driver-name">${label}<em>weight ${Math.round(weights[key] * 100)}%</em></span>
-      <span class="hs-bar-track"><span class="hs-bar-fill" style="width:${Math.round(s.parts[key] * 100)}%"></span></span>
-      <span class="hs-driver-val" title="Share of the highest state on this input">${Math.round(s.parts[key] * 100)}%</span>
+      <span class="hs-bar-track"><span class="hs-bar-fill" style="width:${Math.round(s.parts[key] * 100)}%;background:${heatColor(s.parts[key])}"></span></span>
+      <span class="hs-driver-val" title="Score against the highest state on this input">${Math.round(s.parts[key] * 100)}%</span>
       <span class="hs-driver-pts" title="Points this input adds to the score">+${s.points[key].toFixed(1)}</span>
     </div>`).join('');
 
@@ -1196,7 +1252,7 @@ function hsRenderStatePanel() {
       <div class="hs-chart-block">
         <div class="hs-block-head"><i class="ti ti-chart-bar"></i> What drives the score</div>
         <div class="hs-drivers">${drivers}</div>
-        <div class="hs-sp-foot">Bars show ${escapeHtml(hsShortName(s.state))} against the highest state on each input. The points add up to the score of ${s.composite}.</div>
+        <div class="hs-sp-foot">Bars show ${escapeHtml(hsShortName(s.state))} against the highest state on each input${acledHistory ? ' (deaths and incidents on a square-root scale)' : ''}. The points add up to the score of ${s.composite}.</div>
       </div>
       <div class="hs-chart-block">
         <div class="hs-block-head"><i class="ti ti-users"></i> Who is behind the attacks</div>
@@ -1205,11 +1261,12 @@ function hsRenderStatePanel() {
       </div>
 
     <div class="hs-chart-block">
-      <div class="hs-block-head"><i class="ti ti-chart-line"></i> Aid worker incidents by year</div>
-      ${s.awsdRecords.length
+      <div class="hs-block-head"><i class="ti ti-chart-line"></i> ${acledHistory ? 'Deaths and incidents by year (ACLED)' : 'Aid worker incidents by year'}</div>
+      ${acledHistory || s.awsdRecords.length
         ? '<div class="hs-chart-frame"><canvas id="hsStateTrend"></canvas></div>'
         : `<div class="hs-live-empty">No aid worker incident is recorded for ${escapeHtml(s.state)}.</div>`}
     </div>
+    ${hsStateLgasHtml(s)}
 
     <div class="hs-chart-block">
       <div class="hs-tabs" role="tablist">
@@ -1222,17 +1279,41 @@ function hsRenderStatePanel() {
   hsRenderStateTrend(s);
 }
 
+// The state's most affected local government areas over the whole ACLED period.
+function hsStateLgasHtml(s) {
+  if (!acledHistory) return '';
+  const { firstYear, lastYear } = acledHistory.meta;
+  const deaths = histTopLgas(s.state, 'fatalities', firstYear, lastYear, 6);
+  if (!deaths.length) return '';
+  const incidents = new Map(histTopLgas(s.state, 'events', firstYear, lastYear, 999).map(lga => [lga.name, lga.value]));
+  const top = deaths[0].value;
+  return `
+    <div class="hs-chart-block">
+      <div class="hs-block-head"><i class="ti ti-map-pin"></i> Most affected local government areas</div>
+      <div class="hs-drivers">${deaths.map(lga => `
+        <div class="hs-driver hs-driver-actor" title="${(incidents.get(lga.name) || 0).toLocaleString()} incidents">
+          <span class="hs-driver-name">${escapeHtml(lga.name)}</span>
+          <span class="hs-bar-track"><span style="display:block;height:100%;width:${Math.max(3, Math.round(lga.value / top * 100))}%;background:#ff5a5f"></span></span>
+          <span class="hs-driver-val">${lga.value.toLocaleString()}</span>
+        </div>`).join('')}</div>
+      <div class="hs-sp-foot">Deaths from political violence, ${escapeHtml(histCoverageText())} (ACLED). Hover a row for its incident count.</div>
+    </div>`;
+}
+
 function hsRenderStateTrend(s) {
   const canvas = document.getElementById('hsStateTrend');
   if (!canvas) return;
   const { tc, gc } = getChartThemeColors();
-  const years = [...new Set(awsdData.map(r => r.year))].sort((a, b) => a - b);
+  const years = acledHistory ? histYearLabels() : [...new Set(awsdData.map(r => r.year))].sort((a, b) => a - b);
   const count = pick => years.map(year => s.awsdRecords.filter(r => r.year === year).reduce((sum, r) => sum + pick(r), 0));
   new Chart(canvas, {
     type: 'bar',
     data: {
       labels: years,
-      datasets: [
+      datasets: acledHistory ? [
+        { label: 'Incidents', data: histYearly(s.state, 'events'), backgroundColor: '#f5a623', borderRadius: 3, maxBarThickness: 18 },
+        { label: 'Deaths', data: histYearly(s.state, 'fatalities'), backgroundColor: '#ff5a5f', borderRadius: 3, maxBarThickness: 18 }
+      ] : [
         { label: 'Incidents', data: count(() => 1), backgroundColor: '#2e8fff', borderRadius: 3, maxBarThickness: 18 },
         { label: 'Workers affected', data: count(r => r.affected), backgroundColor: '#f5a623', borderRadius: 3, maxBarThickness: 18 }
       ]

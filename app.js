@@ -1,6 +1,8 @@
 ﻿const DATA_URL = 'dashboard_data.json';
 const NEWS_CONFIG_URL = 'news_config.json';
+const HISTORY_URL = 'acled_history.json';
 
+let acledHistory = null;
 let stateData = [];
 let awsdData = [];
 let chartData = {};
@@ -28,7 +30,141 @@ async function loadDashboardData() {
   if (!response.ok) {
     throw new Error(`Unable to load ${DATA_URL}: ${response.status}`);
   }
-  return response.json();
+  const data = await response.json();
+  // The ACLED history is optional: without it the dashboard falls back to the
+  // state totals stored in dashboard_data.json.
+  try {
+    const history = await fetch(HISTORY_URL);
+    if (history.ok) data.history = await history.json();
+  } catch (error) {
+    console.warn(`Unable to load ${HISTORY_URL}`, error);
+  }
+  return data;
+}
+
+// ── One colour scale for intensity across the page ──────────────────────
+// The same ramp as the Seasons grid: cool blue for low, a neutral middle,
+// orange to red for high. Maps, bubbles, bars, charts and the hotspot cards
+// all read from it so a colour means the same thing everywhere.
+const HEAT_STOPS = [[0, '#3b6fb6'], [0.25, '#9db7d6'], [0.5, '#e8e8e8'], [0.75, '#f5b27a'], [1, '#e0533d']];
+const HEAT_CLASSES = HEAT_STOPS.map(([, hex]) => hex);   // five classes, low to high
+function heatRgb(t) {
+  const v = Math.max(0, Math.min(1, Number(t) || 0));
+  const rgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+  for (let i = 1; i < HEAT_STOPS.length; i++) {
+    const [x1, c1] = HEAT_STOPS[i - 1], [x2, c2] = HEAT_STOPS[i];
+    if (v <= x2) {
+      const k = (v - x1) / (x2 - x1), a = rgb(c1), b = rgb(c2);
+      return a.map((c, j) => Math.round(c + (b[j] - c) * k));
+    }
+  }
+  return rgb(HEAT_STOPS[HEAT_STOPS.length - 1][1]);
+}
+function heatColor(t, alpha = 1) {
+  const [r, g, b] = heatRgb(t);
+  return alpha < 1 ? `rgba(${r},${g},${b},${alpha})` : `rgb(${r},${g},${b})`;
+}
+// Dark text on the pale middle of the scale, white on the ends.
+function heatTextColor(t) {
+  const [r, g, b] = heatRgb(t);
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#10151c' : '#ffffff';
+}
+
+// ── ACLED history (acled_history.json, built by build_acled_history.py) ──
+// Per state: events / fatalities / civEvents / civFatalities as [year][month]
+// grids, plus yearly totals for each local government area.
+const RISK_WINDOW_YEARS = 3;
+const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function histState(stateName) {
+  return acledHistory ? acledHistory.byState.get(stateName) || null : null;
+}
+
+// Rows to add up: one state, or every state when no name is given.
+function histRows(stateName) {
+  if (!acledHistory) return [];
+  if (!stateName) return acledHistory.states;
+  const row = histState(stateName);
+  return row ? [row] : [];
+}
+
+// One value per year in acledHistory.years. monthLimit keeps only the first N months.
+function histYearly(stateName, series, monthLimit = 12) {
+  if (!acledHistory) return [];
+  const rows = histRows(stateName);
+  return acledHistory.years.map((_, yi) => rows.reduce((sum, row) =>
+    sum + row[series][yi].slice(0, monthLimit).reduce((a, b) => a + b, 0), 0));
+}
+
+function histTotal(stateName, series, yearFrom, yearTo) {
+  if (!acledHistory) return 0;
+  return histYearly(stateName, series).reduce((sum, value, yi) => {
+    const year = acledHistory.years[yi];
+    return year >= yearFrom && year <= yearTo ? sum + value : sum;
+  }, 0);
+}
+
+// Twelve values, January to December, summed across the years in the window.
+function histMonthly(stateName, series, yearFrom, yearTo) {
+  const months = new Array(12).fill(0);
+  if (!acledHistory) return months;
+  histRows(stateName).forEach(row => {
+    acledHistory.years.forEach((year, yi) => {
+      if (year < yearFrom || year > yearTo) return;
+      row[series][yi].forEach((value, m) => { months[m] += value; });
+    });
+  });
+  return months;
+}
+
+// Local government areas of a state ranked by a series over the window.
+function histTopLgas(stateName, series, yearFrom, yearTo, limit = 5) {
+  const row = histState(stateName);
+  if (!row) return [];
+  return row.lgas
+    .map(lga => ({
+      name: lga.name,
+      value: lga[series].reduce((sum, v, yi) => {
+        const year = acledHistory.years[yi];
+        return year >= yearFrom && year <= yearTo ? sum + v : sum;
+      }, 0)
+    }))
+    .filter(lga => lga.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, limit);
+}
+
+// Year labels with the unfinished final year marked, e.g. "2026*".
+function histYearLabels() {
+  if (!acledHistory) return [];
+  const { lastYear, lastMonth } = acledHistory.meta;
+  return acledHistory.years.map(year => (year === lastYear && lastMonth < 12 ? `${year}*` : String(year)));
+}
+
+function histCoverageText() {
+  if (!acledHistory) return '';
+  const { firstYear, lastYear, lastMonth } = acledHistory.meta;
+  return lastMonth < 12 ? `${firstYear} – ${MONTH_LABELS[lastMonth - 1]} ${lastYear}` : `${firstYear} – ${lastYear}`;
+}
+
+function adoptHistory(history) {
+  if (!history || !Array.isArray(history.states) || !history.states.length) return;
+  acledHistory = history;
+  acledHistory.byState = new Map(history.states.map(row => [row.state, row]));
+  const { firstYear, lastYear } = history.meta;
+  // The risk index (hotspot.js, and through it Travel Safety) scores states on
+  // the last RISK_WINDOW_YEARS years, so it reflects where violence is now and
+  // not where it was a decade ago.
+  acledHistory.riskFrom = Math.max(firstYear, lastYear - RISK_WINDOW_YEARS + 1);
+  stateData.forEach(state => {
+    const row = histState(state.state);
+    if (!row) return;
+    state.zone = row.zone;
+    state.deaths = histTotal(state.state, 'fatalities', firstYear, lastYear);
+    state.incidents = histTotal(state.state, 'events', firstYear, lastYear);
+    state.recentDeaths = histTotal(state.state, 'fatalities', acledHistory.riskFrom, lastYear);
+    state.recentIncidents = histTotal(state.state, 'events', acledHistory.riskFrom, lastYear);
+  });
 }
 
 async function loadNewsConfig() {
@@ -56,12 +192,12 @@ function updateSummary(meta) {
   document.getElementById('totalDeathsKpi').textContent = totalDeaths.toLocaleString();
   document.getElementById('totalIncidentsKpi').textContent = totalIncidents.toLocaleString();
   document.getElementById('aidWorkersKpi').textContent = totalAffected.toLocaleString();
-  document.getElementById('statesKpi').textContent = stateData.length.toLocaleString();
-  // Matching-incidents KPI (reflects the geolocated aid-incident set shown on the map)
+  // Aid-incident KPI (reflects the geolocated aid-incident set shown on the map)
   const geo = awsdData.filter(d=>d.year>=2015);
   const matchStates = new Set(geo.map(d=>d.region)).size;
   const mk=document.getElementById('matchKpi'); if(mk) mk.textContent=geo.length.toLocaleString();
   const ms=document.getElementById('matchKpiSub'); if(ms) ms.textContent=`of ${awsdData.length.toLocaleString()} · ${matchStates} states`;
+  const hs=document.getElementById('hsCoverage'); if(hs && acledHistory) hs.textContent=histCoverageText();
   renderSparklines();
 }
 
@@ -71,18 +207,26 @@ function showLoadError(error) {
   console.error(error);
 }
 
-// --- KPI sparklines (modelled trend shapes; swap for real series when available) ---
-const SPARK_SERIES = {
-  'spark-deaths':     [8,10,9,13,12,16,18,17,22,26,31],
-  'spark-incidents':  [14,13,16,15,18,17,20,22,21,24,26],
-  'spark-aid':        [6,8,7,9,11,10,13,12,14,13,11],
-  'spark-states':     [30,31,33,34,35,36,36,37,37,37,37]
-};
-const SPARK_COLORS = {'spark-deaths':'#ff5a5f','spark-incidents':'#f5a623','spark-aid':'#2e8fff','spark-states':'#35d08a'};
-function renderSparklines(){
-  Object.keys(SPARK_SERIES).forEach(id=>{
+// --- KPI sparklines: one point per year, for the whole country or one state ---
+const SPARK_COLORS = {'spark-deaths':'#ff5a5f','spark-incidents':'#f5a623','spark-aid':'#2e8fff'};
+function sparkSeries(stateName){
+  if (!acledHistory) return {};
+  const years = acledHistory.years;
+  const region = stateName === 'FCT (Abuja)' ? 'FCT' : stateName;
+  return {
+    'spark-deaths': histYearly(stateName, 'fatalities'),
+    'spark-incidents': histYearly(stateName, 'events'),
+    'spark-aid': years.map(year => awsdData
+      .filter(d => d.year === year && (!stateName || d.region === region))
+      .reduce((sum, d) => sum + d.affected, 0))
+  };
+}
+function renderSparklines(stateName = null){
+  const series = sparkSeries(stateName);
+  Object.keys(SPARK_COLORS).forEach(id=>{
     const svg=document.getElementById(id); if(!svg) return;
-    const data=SPARK_SERIES[id], color=SPARK_COLORS[id];
+    const data=series[id], color=SPARK_COLORS[id];
+    if(!data || data.length<2){ svg.innerHTML=''; return; }
     const W=120,H=34,pad=3;
     const mn=Math.min(...data),mx=Math.max(...data),rng=(mx-mn)||1;
     const pts=data.map((v,i)=>[pad+(i/(data.length-1))*(W-pad*2), H-pad-((v-mn)/rng)*(H-pad*2)]);
@@ -196,9 +340,28 @@ function escapeHtml(value) {
   })[char]);
 }
 
+// The server already merges repeated stories (see dedupe_articles in
+// dev_server.py). These keys are a second guard for any feed that reaches the
+// page another way: same link with different tracking, or the same headline.
+function newsUrlKey(url) {
+  try {
+    const u = new URL(url);
+    return `${u.hostname.replace(/^(www|m|amp)\./, '')}${u.pathname.replace(/\/(amp\/?)?$/, '')}`.toLowerCase();
+  } catch (error) {
+    return String(url || '').toLowerCase();
+  }
+}
+
+function newsTitleKey(title) {
+  return String(title || '').toLowerCase()
+    .replace(/\s+[-|–—]\s+[^-|–—]{2,40}$/, '')   // trailing " - Outlet name"
+    .replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
 function normalizeNewsArticles(data) {
   const articles = data.articles || data.items || [];
   const seen = new Set();
+  const seenTitles = new Set();
 
   return articles
     .map(article=>{
@@ -214,17 +377,22 @@ function normalizeNewsArticles(data) {
         seenDate: article.seenDate || article.seendate || article.date_published || article.pubDate,
         provider: article.provider || data.provider || 'news',
         matchedKeywords: article.matchedKeywords || [],
-        matchedLocations: article.matchedLocations || []
+        matchedLocations: article.matchedLocations || [],
+        alsoReportedBy: article.alsoReportedBy || []
       };
     })
     .filter(article=>{
-      if (!article.title || !article.url || !article.url.startsWith('http') || seen.has(article.url)) return false;
-      seen.add(article.url);
+      if (!article.title || !article.url || !article.url.startsWith('http')) return false;
+      const urlKey = newsUrlKey(article.url);
+      const titleKey = newsTitleKey(article.title);
+      if (seen.has(urlKey) || (titleKey && seenTitles.has(titleKey))) return false;
+      seen.add(urlKey);
+      if (titleKey) seenTitles.add(titleKey);
       return true;
     });
 }
 
-function renderLiveNews(articles, refreshedAt, refreshMinutes, lookbackHours = 24, sourceMode = 'rss') {
+function renderLiveNews(articles, refreshedAt, refreshMinutes, lookbackHours = 24, sourceMode = 'rss', duplicatesRemoved = 0) {
   liveArticles = articles;
   const feed = document.getElementById('liveNewsFeed');
   const status = document.getElementById('liveNewsStatus');
@@ -240,7 +408,7 @@ function renderLiveNews(articles, refreshedAt, refreshMinutes, lookbackHours = 2
     ? new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
     : checkedDate.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
   const refreshText = ' Auto-refresh is on.';
-  const windowText = ` Showing last ${lookbackHours}h.`;
+  const windowText = ` Showing last ${lookbackHours}h.${duplicatesRemoved ? ` ${duplicatesRemoved} repeated ${duplicatesRemoved === 1 ? 'story' : 'stories'} merged.` : ''}`;
   const providerLabel = sourceMode === 'gdelt'
     ? 'GDELT reports'
     : sourceMode === 'cached'
@@ -256,14 +424,20 @@ function renderLiveNews(articles, refreshedAt, refreshMinutes, lookbackHours = 2
     : 'RSS: none';
   renderLiveAnalysis(articles, now);
 
+  // Each headline read into a place, figures and a trust level (insights.js).
+  articles.forEach(article => { article.incident = extractNewsIncident(article); });
   articles.slice(0, 20).forEach((article,index)=>{
     const highlightClass = shouldHighlightNewest && index === 0 ? ' news-item-fresh' : '';
+    const incident = article.incident;
+    const facts = incidentFactsText(incident);
+    const others = article.alsoReportedBy.length ? ` title="Also reported by ${escapeHtml(article.alsoReportedBy.join(', '))}"` : ` title="${escapeHtml(incident.trust.why)}"`;
     feed.innerHTML += `<a class="inc-item news-item${highlightClass}" href="${escapeHtml(article.url)}" target="_blank" rel="noopener noreferrer" data-report-index="${index}">
       <div class="news-title">${escapeHtml(article.title)}</div>
       <div class="news-meta"><span class="news-source">${escapeHtml(article.domain)}</span><span class="news-time">${escapeHtml(formatNewsDate(article.seenDate))}</span></div>
+      <div class="news-place"><i class="ti ti-map-pin"></i> ${escapeHtml(incident.placeLabel)}${facts ? ` <span class="news-facts">· ${escapeHtml(facts)}</span>` : ''}</div>
       <div class="inc-tags">
-        <span class="inc-tag tag-live">Live report</span>
-        <span class="inc-tag tag-report">Media source</span>
+        <span class="inc-tag news-type t-${incident.type.key}">${escapeHtml(incident.type.label)}</span>
+        ${incident.isIncident ? `<span class="trust trust-${incident.trust.key}"${others}><i class="ti ${incident.trust.key === 'corroborated' ? 'ti-circle-check' : incident.trust.key === 'multiple' ? 'ti-copy' : 'ti-point'}"></i> ${escapeHtml(incident.trust.label)}</span>` : ''}
       </div>
     </a>`;
   });
@@ -283,6 +457,10 @@ function renderLiveNews(articles, refreshedAt, refreshMinutes, lookbackHours = 2
   }
 
   updateChartsWithLiveReports(articles);
+  // Map pins, the state ranking and the briefing follow the feed too.
+  if (typeof window.onDashboardLiveUpdate === 'function') window.onDashboardLiveUpdate();
+  renderBriefing();
+  checkWatchAlerts();
   // The hotspot index reads the same feed; hotspot.js loads after this file.
   if (typeof onHotspotLiveUpdate === 'function') onHotspotLiveUpdate();
 }
@@ -461,6 +639,7 @@ function focusStateOnMap(state, popupTitle, popupBody) {
 
 function showLiveReportOnMap(article) {
   if (!article || !mapInstance || !liveReportLayer) return;
+  if (typeof window.openNewsPin === 'function' && window.openNewsPin(article)) return;
 
   const matchedLocation = primaryLocationForArticle(article);
   const matchedState = primaryStateForArticle(article);
@@ -531,54 +710,17 @@ function topKeysFromCounts(countMaps, limit = 6) {
 }
 
 function updateChartsWithLiveReports(articles) {
-  if (!trendChart || !attackDonutChart || !monthBarChart) return;
+  if (!attackDonutChart) return;
 
   // "Historical" side reflects the active filter when one is applied.
   const hist = chartFilterSet || awsdData;
-  const historicalYearCounts = countBy(hist, item=>String(item.year));
-  const currentYearCounts = countBy(
-    articles.filter(article=>!Number.isNaN(new Date(article.seenDate).getTime())),
-    article=>String(new Date(article.seenDate).getFullYear())
-  );
-  const yearLabels = [...new Set([
-    ...[...historicalYearCounts.keys()].sort(),
-    ...[...currentYearCounts.keys()].sort()
-  ])];
-
-  trendChart.data.labels = yearLabels;
-  trendChart.data.datasets = [
-    {
-      type:'bar',
-      label:'Historical aid worker incidents',
-      data:yearLabels.map(label=>historicalYearCounts.get(label) || 0),
-      backgroundColor:'rgba(88,166,255,0.65)',
-      borderRadius:4,
-      order:2
-    },
-    {
-      type:'line',
-      label:'Current live reports',
-      data:yearLabels.map(label=>currentYearCounts.get(label) || 0),
-      borderColor:'#3fb950',
-      backgroundColor:'rgba(63,185,80,0.18)',
-      fill:false,
-      tension:0.3,
-      pointRadius:4,
-      pointBackgroundColor:'#3fb950',
-      pointBorderColor:'#3fb950',
-      order:1
-    }
-  ];
-  trendChart.options.plugins.legend.display = true;
-  trendChart.update();
-
   const attackLabels = ['Kidnapping','Shooting/Killing','Armed attack','Assault','Security operations','Other'];
   const historicalAttackCounts = countBy(hist, classifyHistoricalAttack);
   const currentAttackCounts = countBy(articles, classifyLiveAttack);
   attackDonutChart.data.labels = attackLabels;
   attackDonutChart.data.datasets = [
     {
-      label:'Historical incidents',
+      label:'Aid worker records',
       data:attackLabels.map(label=>historicalAttackCounts.get(label) || 0),
       backgroundColor:'#58a6ff',
       borderRadius:4
@@ -591,32 +733,6 @@ function updateChartsWithLiveReports(articles) {
     }
   ];
   attackDonutChart.update();
-
-  const historicalStateCounts = countBy(hist, item=>item.region === 'FCT' ? 'Abuja' : item.region);
-  const currentStateCounts = countBy(
-    articles
-      .map(article=>primaryStateForArticle(article))
-      .filter(Boolean)
-      .map(state=>state.state === 'FCT (Abuja)' ? 'Abuja' : state.state),
-    value=>value
-  );
-  const stateLabels = topKeysFromCounts([historicalStateCounts, currentStateCounts], 6);
-  monthBarChart.data.labels = stateLabels;
-  monthBarChart.data.datasets = [
-    {
-      label:'Historical incidents',
-      data:stateLabels.map(label=>historicalStateCounts.get(label) || 0),
-      backgroundColor:'#d29922',
-      borderRadius:4
-    },
-    {
-      label:'Current live reports',
-      data:stateLabels.map(label=>currentStateCounts.get(label) || 0),
-      backgroundColor:'#3fb950',
-      borderRadius:4
-    }
-  ];
-  monthBarChart.update();
 }
 
 async function loadLiveNews() {
@@ -656,7 +772,8 @@ async function loadLiveNews() {
           liveData.refreshedAt,
           Math.round(LIVE_REFRESH_MS / 60000),
           lookbackHours,
-          liveData.sourceMode || liveData.provider || 'rss'
+          liveData.sourceMode || liveData.provider || 'rss',
+          Number(liveData.duplicatesRemoved) || 0
         );
         liveFeedLastUpdatedAt = Date.now();
         if (liveData.isCachedSnapshot) {
@@ -706,12 +823,13 @@ function initDashboard(data) {
   stateData = data.stateData;
   awsdData = data.awsdData;
   chartData = data.charts;
+  adoptHistory(data.history);
   // These helpers are declared inside this function's scope but are invoked from
   // inline handlers / top-level updateSummary, so expose them on the global object.
   Object.assign(window, {
     renderSparklines, toggleLayersPanel, updateLayerCount, setRange, toggleSevPill,
     resetFilters, switchReportTab, handleGlobalSearch, onTimeSlider, toggleTimePlay,
-    applyTimeFilter, applyFilters
+    applyTimeFilter, applyFilters, setDashMetric, selectDashState, toggleLegendPanel, shortStateName, focusLga
   });
   initializeLocationAliasMap();
   updateSummary(data.meta);
@@ -720,7 +838,8 @@ function initDashboard(data) {
   loadLiveNews().catch(showNewsError);
 
 // MAP
-const map=L.map('map',{center:[9.0,8.0],zoom:6,zoomControl:true});
+const MAP_HOME = { center:[9.0,8.0], zoom:6 };
+const map=L.map('map',{center:MAP_HOME.center,zoom:MAP_HOME.zoom,zoomControl:true});
 mapInstance = map;
 liveReportLayer = L.layerGroup().addTo(map);
 const initTile = document.documentElement.getAttribute('data-theme') === 'light' ? LIGHT_TILE : DARK_TILE;
@@ -729,8 +848,6 @@ mainTileLayer = L.tileLayer(initTile, TILE_OPTS).addTo(map);
 const maxDeaths=Math.max(...stateData.map(d=>d.deaths));
 function dColor(d){return d>2000?'#f85149':d>800?'#d29922':'#58a6ff';}
 function dRadius(d){return Math.max(8,Math.sqrt(d/maxDeaths)*56);}
-function riskClass(deaths){return deaths>2000?'risk-critical':deaths>800?'risk-high':'risk-elevated';}
-function riskLabel(deaths){return deaths>2000?'CRITICAL':deaths>800?'HIGH':'ELEVATED';}
 
 // AID-INCIDENT CHOROPLETH — states shaded by the number of (filtered) aid-worker
 // incidents. Opt-in layer; recoloured live by applyFilters() via a relative scale
@@ -749,9 +866,9 @@ let choroMax = 1;
 function choroColor(c){
   if (!c) return '#2a3344';
   const r = c / (choroMax || 1);
-  return r > 0.75 ? '#7a0a0e' :
-         r > 0.5  ? '#b11419' :
-         r > 0.25 ? '#e23b36' : '#ff5a5f';
+  return r > 0.75 ? HEAT_CLASSES[4] :
+         r > 0.5  ? HEAT_CLASSES[3] :
+         r > 0.25 ? HEAT_CLASSES[2] : HEAT_CLASSES[1];
 }
 function choroStyle(f){
   const c = choroCounts.get(normState(f.properties.shapeName)) || 0;
@@ -783,44 +900,437 @@ function refreshChoropleth(){
   bubbleLayer.setStyle(choroStyle);
   bubbleLayer.eachLayer(l => { if (l.feature) l.setPopupContent(choroPopup(l.feature)); });
 }
-// ── ACLED TOTAL DEATHS choropleth (static reference; distinct amber ramp) ──
-function deathsChoroColor(d){
-  return d > 2000 ? '#7a0a0e' :
-         d > 1000 ? '#b11419' :
-         d > 500  ? '#e23b36' :
-         d > 200  ? '#ff5a5f' :
-         d > 0    ? '#ff9ea0' : '#2a3344';
+// ── ACLED deaths / incidents: the metric, year window and state in focus ──
+// The Total Deaths and Incidents cards pick the metric, the year filter and
+// time slider pick the window, and a click on a bubble picks the state. The
+// bubbles, state shading, cards, sparklines and the ACLED charts all follow.
+const DASH_METRICS = {
+  deaths:    { series: 'fatalities', title: 'Deaths',    card: 'Total Deaths', color: '#ff5a5f' },
+  incidents: { series: 'events',     title: 'Incidents', card: 'Incidents',    color: '#f5a623' }
+};
+const dash = { metric: 'deaths', state: null };
+const HIST_FIRST = acledHistory ? acledHistory.meta.firstYear : 2015;
+const HIST_LAST = acledHistory ? acledHistory.meta.lastYear : 2026;
+
+// Year range picked in the "Year range" select, e.g. "2019-2021" or "2022+".
+function yearSelectRange(){
+  const m = /^(\d{4})(?:-(\d{4})|\+)$/.exec(document.getElementById('yearFilter').value);
+  return m ? { from: +m[1], to: m[2] ? +m[2] : HIST_LAST } : { from: HIST_FIRST, to: HIST_LAST };
+}
+function dashWindow(){
+  const range = yearSelectRange();
+  return { from: range.from, to: Math.min(range.to, timeYearMax) };
+}
+function windowText(win){
+  return win.to < win.from ? 'no years selected' : win.from === win.to ? String(win.from) : `${win.from}–${win.to}`;
+}
+function dashValue(stateName, metric, win){
+  if (acledHistory) return histTotal(stateName, DASH_METRICS[metric].series, win.from, win.to);
+  // No history file: only the all-time totals in dashboard_data.json are known.
+  return stateName
+    ? (stateObjectByName(stateName)?.[metric] || 0)
+    : stateData.reduce((sum, s) => sum + s[metric], 0);
+}
+function shortStateName(name){ return name === 'FCT (Abuja)' ? 'FCT' : name; }
+function niceNumber(value){
+  if (value <= 10) return Math.max(1, Math.round(value));
+  const step = Math.pow(10, Math.floor(Math.log10(value)) - 1);
+  return Math.round(value / step) * step;
+}
+
+// Bubbles: one proportional circle per state.
+const BUBBLE_MIN = 4, BUBBLE_SPAN = 26;
+function bubbleRadius(value, max){ return value > 0 ? BUBBLE_MIN + Math.sqrt(value / (max || 1)) * BUBBLE_SPAN : 3; }
+function acledPopup(s){
+  const win = dashWindow();
+  const row = histState(s.state);
+  const deaths = dashValue(s.state, 'deaths', win), incidents = dashValue(s.state, 'incidents', win);
+  const lgas = histTopLgas(s.state, DASH_METRICS[dash.metric].series, win.from, win.to);
+  return `
+    <div class="popup-title">&#x1F4CD; ${escapeHtml(s.state)}${row ? ` &middot; ${escapeHtml(row.zone)}` : ''}</div>
+    <div class="popup-row"><span>Period</span><span>${windowText(win)}</span></div>
+    <div class="popup-row"><span>Deaths</span><span class="popup-metric-danger">${deaths.toLocaleString()}</span></div>
+    <div class="popup-row"><span>Incidents</span><span>${incidents.toLocaleString()}</span></div>
+    ${row ? `<div class="popup-row"><span>Civilians killed</span><span>${histTotal(s.state, 'civFatalities', win.from, win.to).toLocaleString()}</span></div>` : ''}
+    ${lgas.length ? `<div class="popup-lgas"><div class="popup-lgas-hd">Most affected LGAs &middot; ${DASH_METRICS[dash.metric].title.toLowerCase()}</div>
+      ${lgas.map(lga => `<div class="popup-row"><span>${escapeHtml(lga.name)}</span><span>${lga.value.toLocaleString()}</span></div>`).join('')}</div>` : ''}`;
+}
+const acledLayer = L.layerGroup();
+const acledMarkers = new Map();
+stateData.forEach(s => {
+  const marker = L.circleMarker([s.lat, s.lng], { radius: 6, weight: 1.2 })
+    .bindPopup(() => acledPopup(s))
+    .bindTooltip('', { direction: 'top', sticky: true });
+  marker.on('click', () => selectDashState(s.state));
+  marker.addTo(acledLayer);
+  acledMarkers.set(s.state, marker);
+});
+function refreshBubbles(win){
+  const def = DASH_METRICS[dash.metric];
+  const values = new Map(stateData.map(s => [s.state, dashValue(s.state, dash.metric, win)]));
+  const max = Math.max(1, ...values.values());
+  acledMarkers.forEach((marker, name) => {
+    const value = values.get(name), picked = dash.state === name;
+    marker.setRadius(bubbleRadius(value, max));
+    const t = Math.sqrt(value / max);
+    marker.setStyle({
+      fillColor: heatColor(t), color: picked ? '#ffffff' : '#0b1420', weight: picked ? 3 : 1,
+      opacity: picked ? 1 : 0.55, fillOpacity: dash.state && !picked ? 0.18 : 0.78
+    });
+    marker.setTooltipContent(`<strong>${escapeHtml(name)}</strong><br>${value.toLocaleString()} ${def.title.toLowerCase()} &middot; ${windowText(win)}`);
+  });
+  // Smallest circles on top so every state stays clickable.
+  if (map.hasLayer(acledLayer)) {
+    [...values.entries()].sort((a, b) => b[1] - a[1]).forEach(([name]) => acledMarkers.get(name).bringToFront());
+  }
+  const scale = document.getElementById('legAcledScale');
+  const steps = [...new Set([max, max / 4, max / 20].map(niceNumber))].filter(v => v > 0);
+  scale.innerHTML = steps.map(v => {
+    const d = Math.round(bubbleRadius(Math.min(v, max), max) * 2);
+    return `<span class="leg-bubble" style="--bub:${heatColor(Math.sqrt(Math.min(v, max) / max))}"><i style="width:${d}px;height:${d}px"></i>${formatCompact(v)}</span>`;
+  }).join('');
+  document.getElementById('legAcledTitle').textContent = `${def.title} by state · ${windowText(win)}`;
+  return values;
+}
+
+// State shading: the same metric as five classes, split so each holds a
+// similar number of states whatever the window.
+const SHADE_COLORS = HEAT_CLASSES;
+let shadeValues = new Map(), shadeBreaks = [];
+function shadeColor(value){
+  if (!value) return '#2a3344';
+  let i = 0;
+  while (i < shadeBreaks.length && value > shadeBreaks[i]) i++;
+  return SHADE_COLORS[i];
 }
 function deathsChoroStyle(f){
   const meta = stateMetaByNorm.get(normState(f.properties.shapeName));
-  const d = meta ? meta.deaths : 0;
-  return { fillColor: deathsChoroColor(d), fillOpacity: d ? 0.72 : 0.3, color: '#0b1420', weight: 1, opacity: 0.55 };
-}
-function deathsChoroPopup(f){
-  const meta = stateMetaByNorm.get(normState(f.properties.shapeName));
-  const name = meta ? meta.state : f.properties.shapeName;
-  const d = meta ? meta.deaths : 0;
-  return `
-    <div class="popup-title">&#x1F4CD; ${escapeHtml(name)} State</div>
-    <div class="popup-row"><span>Total deaths (ACLED)</span><span class="popup-metric-danger">${d.toLocaleString()}</span></div>
-    ${meta ? `<div class="popup-row"><span>ACLED incidents</span><span>${meta.incidents.toLocaleString()}</span></div>
-    <div class="popup-row"><span>Risk level</span><span class="${riskClass(d)}">${riskLabel(d)}</span></div>` : ''}`;
+  const value = meta ? shadeValues.get(meta.state) || 0 : 0;
+  return { fillColor: shadeColor(value), fillOpacity: value ? 0.72 : 0.3, color: '#0b1420', weight: 1, opacity: 0.55 };
 }
 let deathsLayer = L.geoJSON(null, {
   style: deathsChoroStyle,
   onEachFeature: (f, layer) => {
-    layer.bindPopup(deathsChoroPopup(f));
+    const meta = stateMetaByNorm.get(normState(f.properties.shapeName));
+    if (meta) {
+      layer.bindPopup(() => acledPopup(meta));
+      layer.on('click', () => selectDashState(meta.state));
+    }
     layer.on({
       mouseover: e => e.target.setStyle({ weight: 2, color: '#ffffff' }),
       mouseout:  e => deathsLayer.resetStyle(e.target)
     });
   }
 });
+function refreshShading(values, win){
+  shadeValues = values;
+  const sorted = [...values.values()].filter(v => v > 0).sort((a, b) => a - b);
+  shadeBreaks = [...new Set([0.2, 0.4, 0.6, 0.8]
+    .map(q => niceNumber(sorted[Math.floor(q * (sorted.length - 1))] || 0)))].filter(v => v > 0);
+  deathsLayer.setStyle(deathsChoroStyle);
+  const def = DASH_METRICS[dash.metric];
+  document.getElementById('legShadeTitle').textContent = `${def.title} by state · ${windowText(win)}`;
+  const rows = [];
+  for (let i = shadeBreaks.length; i >= 0; i--) {
+    const label = i === shadeBreaks.length ? `&gt; ${shadeBreaks[i - 1].toLocaleString()}`
+      : i === 0 ? `&le; ${shadeBreaks[0].toLocaleString()}`
+      : `${shadeBreaks[i - 1].toLocaleString()} – ${shadeBreaks[i].toLocaleString()}`;
+    rows.push(`<div class="leg-row"><span class="leg-swatch" style="background:${SHADE_COLORS[i]}"></span>${shadeBreaks.length ? label : 'Any'}</div>`);
+  }
+  rows.push('<div class="leg-row"><span class="leg-swatch" style="background:#2a3344"></span>None recorded</div>');
+  document.getElementById('legShadeRows').innerHTML = rows.join('');
+}
+
+// Live news: one pin per report, at the LGA it names (else its state), coloured
+// by the kind of incident and ringed by how well it is corroborated.
+const liveLayer = L.layerGroup();
+const newsPins = new Map();   // article url -> marker
+function liveArticlesByState(){
+  const byState = new Map();
+  liveArticles.forEach(article => statesForArticle(article).forEach(state => {
+    if (!byState.has(state.state)) byState.set(state.state, []);
+    byState.get(state.state).push(article);
+  }));
+  return byState;
+}
+function newsPinPopup(incident){
+  const a = incident.article;
+  const facts = incidentFactsText(incident);
+  return `
+    <div class="popup-title">${escapeHtml(incident.type.label)} &middot; ${escapeHtml(incident.placeLabel)}</div>
+    <a class="popup-news" href="${escapeHtml(a.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(a.title)}<small>${escapeHtml(a.domain)} &middot; ${escapeHtml(formatNewsDate(a.seenDate))}</small></a>
+    ${facts ? `<div class="popup-row"><span>Reported in headline</span><span>${escapeHtml(facts)}</span></div>` : ''}
+    <div class="popup-row"><span>Trust</span><span class="trust trust-${incident.trust.key}">${escapeHtml(incident.trust.label)}</span></div>
+    <div class="popup-detail">${escapeHtml(incident.trust.why)}${a.alsoReportedBy.length ? ` (also ${escapeHtml(a.alsoReportedBy.join(', '))})` : ''}.${incident.precise ? '' : ' Placed at the state centre: no local government area is named.'}</div>`;
+}
+function refreshLiveLayer(){
+  liveLayer.clearLayers();
+  newsPins.clear();
+  const stacked = new Map();   // spread pins that share a spot
+  newsIncidents().forEach(incident => {
+    if (!incident.point) return;
+    const key = incident.point.join(',');
+    const n = stacked.get(key) || 0;
+    stacked.set(key, n + 1);
+    const angle = n * 2.4, r = n ? 0.07 + n * 0.012 : 0;
+    const at = [incident.point[0] + Math.sin(angle) * r, incident.point[1] + Math.cos(angle) * r];
+    const marker = L.marker(at, {
+      icon: L.divIcon({ html: `<span class="news-pin t-${incident.type.key} trust-ring-${incident.trust.key}"></span>`, className: '', iconSize: [16, 16], iconAnchor: [8, 8] }),
+      zIndexOffset: 700, title: incident.article.title, keyboard: true
+    }).bindPopup(() => newsPinPopup(incident), { maxWidth: 280 }).addTo(liveLayer);
+    newsPins.set(incident.article.url, marker);
+  });
+}
+window.openNewsPin = article => {
+  const marker = newsPins.get(article.url);
+  if (!marker) return false;
+  if (!layerState.live) toggleLayer(document.querySelector('.toggle-btn[data-layer="live"]'));
+  document.querySelector('.map-center')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), article.incident?.precise ? 9 : 7), { duration: 0.9 });
+  setTimeout(() => marker.openPopup(), 950);
+  return true;
+};
+
+// Rising now: a pulsing ring on each LGA whose incidents are well above usual.
+const risingLayer = L.layerGroup();
+function refreshRisingLayer(){
+  risingLayer.clearLayers();
+  risingNow().forEach(item => {
+    if (item.lat == null) return;
+    const lvl = RISING_LEVELS[item.level];
+    L.marker([item.lat, item.lng], {
+      icon: L.divIcon({ html: `<span class="rise-pin ${lvl.cls}"><i class="ti ti-trending-up"></i></span>`, className: '', iconSize: [22, 22], iconAnchor: [11, 11] }),
+      zIndexOffset: 650, title: `${item.name}: ${lvl.label.toLowerCase()}`
+    }).bindPopup(() => `
+      <div class="popup-title"><span class="lvl ${lvl.cls}">${lvl.label}</span> ${escapeHtml(item.name)}, ${escapeHtml(item.state)}</div>
+      <div class="popup-row"><span>Incidents, ${escapeHtml(item.period)}</span><span class="popup-metric-danger">${item.recent.toLocaleString()}</span></div>
+      <div class="popup-row"><span>Usual for three months</span><span>${item.usual.toLocaleString(undefined, { maximumFractionDigits: 1 })}</span></div>
+      <div class="popup-row"><span>Deaths, ${escapeHtml(item.period)}</span><span>${item.deaths.toLocaleString()}</span></div>
+      <div class="popup-detail">"Usual" is the monthly average over the previous twelve months, times three (ACLED).
+        <button type="button" class="popup-btn" onclick="watchLga('${escapeHtml(item.pcode)}')"><i class="ti ti-star"></i> ${isWatched({ type: 'lga', pcode: item.pcode }) ? 'Watching' : 'Watch this LGA'}</button></div>`)
+      .addTo(risingLayer);
+  });
+}
+
+// LGA detail: the local government areas of the state in focus, shaded by
+// the active metric over the year window.
+const LGA_COLORS = HEAT_CLASSES;
+const lgaFocusLayer = L.geoJSON(null, {
+  style: () => ({ color: '#ffffff', weight: 0.8, opacity: 0.7, fillOpacity: 0.6, fillColor: '#2a3344' }),
+  onEachFeature: (f, layer) => layer.bindPopup(() => lgaPopup(f.properties))
+});
+let lgaFocusValues = new Map(), lgaFocusBreaks = [];
+function lgaValue(pcode, series, win){
+  const lga = lgaByPcode.get(pcode);
+  const row = lga && histState(lga.state);
+  const item = row && row.lgas.find(l => l.pcode === pcode);
+  if (!item) return 0;
+  return item[series].reduce((sum, v, yi) => {
+    const year = acledHistory.years[yi];
+    return year >= win.from && year <= win.to ? sum + v : sum;
+  }, 0);
+}
+function lgaPopup(props){
+  const win = dashWindow();
+  const idp = displacementData?.lgas[props.pcode];
+  const rise = risingNow().find(item => item.pcode === props.pcode);
+  return `
+    <div class="popup-title">&#x1F4CD; ${escapeHtml(props.name)} LGA &middot; ${escapeHtml(props.state)}</div>
+    <div class="popup-row"><span>Period</span><span>${windowText(win)}</span></div>
+    <div class="popup-row"><span>Deaths</span><span class="popup-metric-danger">${lgaValue(props.pcode, 'fatalities', win).toLocaleString()}</span></div>
+    <div class="popup-row"><span>Incidents</span><span>${lgaValue(props.pcode, 'events', win).toLocaleString()}</span></div>
+    ${idp ? `<div class="popup-row"><span>Displaced people (IOM)</span><span>${idp.idps.toLocaleString()}</span></div>` : ''}
+    ${rise ? `<div class="popup-detail"><span class="lvl ${RISING_LEVELS[rise.level].cls}">${RISING_LEVELS[rise.level].label}</span> ${escapeHtml(risingExplain(rise))}</div>` : ''}
+    <div class="popup-detail"><button type="button" class="popup-btn" onclick="watchLga('${escapeHtml(props.pcode)}')"><i class="ti ti-star"></i> ${isWatched({ type: 'lga', pcode: props.pcode }) ? 'Watching' : 'Watch this LGA'}</button></div>`;
+}
+function lgaFocusColor(value){
+  if (!value) return '#2a3344';
+  let i = 0;
+  while (i < lgaFocusBreaks.length && value > lgaFocusBreaks[i]) i++;
+  return LGA_COLORS[i];
+}
+function refreshLgaFocus(win){
+  lgaFocusLayer.clearLayers();
+  const legend = document.getElementById('legLgaRows');
+  const show = Boolean(dash.state && lgaGeo && layerState.acled);
+  document.querySelector('[data-legend="lgaFocus"]').dataset.on = show ? '1' : '';
+  if (show) {
+    const def = DASH_METRICS[dash.metric];
+    const features = lgaGeo.features.filter(f => f.properties.state === dash.state);
+    lgaFocusValues = new Map(features.map(f => [f.properties.pcode, lgaValue(f.properties.pcode, def.series, win)]));
+    const sorted = [...lgaFocusValues.values()].filter(v => v > 0).sort((a, b) => a - b);
+    lgaFocusBreaks = [...new Set([0.2, 0.4, 0.6, 0.8].map(q => niceNumber(sorted[Math.floor(q * (sorted.length - 1))] || 0)))].filter(v => v > 0);
+    lgaFocusLayer.addData({ type: 'FeatureCollection', features });
+    lgaFocusLayer.setStyle(f => {
+      const v = lgaFocusValues.get(f.properties.pcode) || 0;
+      return { color: '#ffffff', weight: 0.8, opacity: 0.75, fillColor: lgaFocusColor(v), fillOpacity: v ? 0.72 : 0.25 };
+    });
+    lgaFocusLayer.bringToBack();
+    document.getElementById('legLgaTitle').textContent = `${def.title} by LGA · ${shortStateName(dash.state)} · ${windowText(win)}`;
+    const rows = [];
+    for (let i = lgaFocusBreaks.length; i >= 0; i--) {
+      const label = !lgaFocusBreaks.length ? 'Any' : i === lgaFocusBreaks.length ? `&gt; ${lgaFocusBreaks[i - 1].toLocaleString()}`
+        : i === 0 ? `&le; ${lgaFocusBreaks[0].toLocaleString()}` : `${lgaFocusBreaks[i - 1].toLocaleString()} – ${lgaFocusBreaks[i].toLocaleString()}`;
+      rows.push(`<div class="leg-row"><span class="leg-swatch" style="background:${LGA_COLORS[i]}"></span>${label}</div>`);
+    }
+    rows.push('<div class="leg-row"><span class="leg-swatch" style="background:#2a3344"></span>None recorded</div>');
+    legend.innerHTML = rows.join('');
+  }
+  syncLegend();
+}
+
+// Reference layers: every LGA outline, and people displaced by LGA (IOM DTM).
+const lgaLinesLayer = L.geoJSON(null, {
+  style: { color: '#9fb3c8', weight: 0.6, opacity: 0.55, fill: false },
+  interactive: false
+});
+const IDP_COLORS = ['#e9dcff', '#c9a8ff', '#a477f5', '#7c4dd6', '#4f2a99'];
+const IDP_BREAKS = [5000, 20000, 50000, 100000];
+function idpColor(n){ let i = 0; while (i < IDP_BREAKS.length && n > IDP_BREAKS[i]) i++; return IDP_COLORS[i]; }
+const displacedLayer = L.geoJSON(null, {
+  filter: f => Boolean(displacementData?.lgas[f.properties.pcode]),
+  style: f => ({ color: '#4f2a99', weight: 0.6, opacity: 0.6, fillColor: idpColor(displacementData.lgas[f.properties.pcode].idps), fillOpacity: 0.7 }),
+  onEachFeature: (f, layer) => layer.bindPopup(() => {
+    const d = displacementData.lgas[f.properties.pcode];
+    const [y, m] = d.asOf.split('-').map(Number);
+    return `<div class="popup-title">${escapeHtml(f.properties.name)} LGA &middot; ${escapeHtml(f.properties.state)}</div>
+      <div class="popup-row"><span>Displaced people</span><span>${d.idps.toLocaleString()}</span></div>
+      <div class="popup-row"><span>Counted</span><span>${MONTH_LABELS[m - 1]} ${y}</span></div>
+      <div class="popup-detail">IOM Displacement Tracking Matrix, latest round covering this LGA.</div>`;
+  })
+});
+// Fill the outline layers once the boundaries have loaded.
+function fillLgaLayers(){
+  if (!lgaGeo) return;
+  if (!lgaLinesLayer.getLayers().length) lgaLinesLayer.addData(lgaGeo);
+  if (displacementData && !displacedLayer.getLayers().length) displacedLayer.addData(lgaGeo);
+}
+
+// Change against the year before. An unfinished final year is compared over
+// its complete months only (the latest month is still being reported).
+function dashDelta(stateName, series, win){
+  if (!acledHistory || win.to < win.from) return null;
+  const { firstYear, lastYear, lastMonth } = acledHistory.meta;
+  const year = win.to;
+  if (year - 1 < firstYear) return null;
+  const months = year === lastYear && lastMonth < 12 ? lastMonth - 1 : 12;
+  if (months < 1) return null;
+  const yearly = histYearly(stateName, series, months);
+  const yi = acledHistory.years.indexOf(year);
+  const current = yearly[yi], previous = yearly[yi - 1];
+  if (!previous) return null;
+  const pct = ((current - previous) / previous) * 100;
+  const span = months < 12 ? `${months === 1 ? 'Jan' : `Jan–${MONTH_LABELS[months - 1]}`} ${year - 1}` : String(year - 1);
+  return { pct, text: `${pct > 0 ? '↑' : pct < 0 ? '↓' : '→'} ${Math.abs(pct).toFixed(1)}% vs ${span}` };
+}
+function renderDashKpis(win){
+  const scope = dash.state ? ` · ${shortStateName(dash.state)}` : '';
+  [['deaths', 'totalDeathsKpi', 'deathsKpiLabel', 'deathsKpiDelta'],
+   ['incidents', 'totalIncidentsKpi', 'incidentsKpiLabel', 'incidentsKpiDelta']
+  ].forEach(([metric, valueId, labelId, deltaId]) => {
+    const def = DASH_METRICS[metric];
+    document.getElementById(valueId).textContent = dashValue(dash.state, metric, win).toLocaleString();
+    document.getElementById(labelId).textContent = `${def.card}${scope}`;
+    const delta = dashDelta(dash.state, def.series, win);
+    const el = document.getElementById(deltaId);
+    el.textContent = delta ? delta.text : windowText(win);
+    el.className = `gkpi-delta ${delta ? (delta.pct > 0 ? 'up' : delta.pct < 0 ? 'down' : 'flat') : 'flat'}`;
+  });
+  document.querySelectorAll('#mapMetric .seg-btn').forEach(btn => {
+    const on = btn.dataset.metric === dash.metric;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', String(on));
+  });
+  renderSparklines(dash.state);
+}
+
+function renderAcledCharts(win){
+  const def = DASH_METRICS[dash.metric];
+  const scope = dash.state ? ` — ${dash.state}` : '';
+  document.getElementById('trendTitle').textContent = `Deaths and incidents by year${scope}`;
+  document.getElementById('monthTitle').textContent = `${def.title} by month${scope} · ${windowText(win)}`;
+  if (!acledHistory || !trendChart || !monthBarChart) return;
+  const inWindow = acledHistory.years.map(year => year >= win.from && year <= win.to);
+  trendChart.data.labels = histYearLabels();
+  trendChart.data.datasets = [
+    {
+      type:'bar', label:'Incidents', yAxisID:'y', order:2, borderRadius:4,
+      data:histYearly(dash.state, 'events'),
+      backgroundColor:(() => {
+        const events = histYearly(dash.state, 'events');
+        const top = Math.max(1, ...events);
+        return events.map((v, i) => heatColor(v / top, inWindow[i] ? 0.9 : 0.25));
+      })()
+    },
+    {
+      type:'line', label:'Deaths', yAxisID:'y1', order:1, tension:0.3, fill:false,
+      data:histYearly(dash.state, 'fatalities'),
+      borderColor:'#c0392b', backgroundColor:'#c0392b', pointRadius:3, pointBackgroundColor:'#c0392b'
+    }
+  ];
+  trendChart.update();
+  // Coloured from the quietest month (blue) to the busiest (red).
+  const monthValues = histMonthly(dash.state, def.series, win.from, win.to);
+  const monthTop = Math.max(...monthValues), monthLow = Math.min(...monthValues);
+  monthBarChart.data.labels = MONTH_LABELS;
+  monthBarChart.data.datasets = [{
+    label:`${def.title}, ${windowText(win)}`,
+    data:monthValues,
+    backgroundColor:monthValues.map(v => heatColor(monthTop > monthLow ? (v - monthLow) / (monthTop - monthLow) : 0.5)),
+    borderRadius:4
+  }];
+  monthBarChart.update();
+}
+
+function refreshAcledViews(){
+  const win = dashWindow();
+  const values = refreshBubbles(win);
+  refreshShading(values, win);
+  refreshLgaFocus(win);
+  renderDashKpis(win);
+  renderAcledCharts(win);
+  renderStateBars(win, values);
+  const def = DASH_METRICS[dash.metric];
+  const note = document.getElementById('mapCountNote');
+  if (note) note.textContent = `${def.title} · ${dash.state || 'all states'} · ${windowText(win)}`;
+}
+
+function setDashMetric(metric){
+  if (!DASH_METRICS[metric]) return;
+  dash.metric = metric;
+  if (!layerState.acled && !layerState.deaths) toggleLayer(document.querySelector('.toggle-btn[data-layer="acled"]'));
+  refreshAcledViews();
+}
+
+// Focus one state (click it again, or pass null, to return to all states).
+function selectDashState(stateName, keepSelected = false){
+  const next = stateName && (keepSelected || dash.state !== stateName) ? stateName : null;
+  dash.state = next;
+  refreshAcledViews();
+  renderFilterChips();
+  const s = next && stateObjectByName(next);
+  if (s) map.flyTo([s.lat, s.lng], Math.max(map.getZoom(), 7), { duration: 0.8 });
+  else map.closePopup();
+}
+
+// Focus an LGA: its state's LGAs are drawn, then the map opens this one.
+function focusLga(pcode){
+  const lga = lgaByPcode.get(pcode);
+  if (!lga) return;
+  if (!layerState.acled) toggleLayer(document.querySelector('.toggle-btn[data-layer="acled"]'));
+  selectDashState(lga.state, true);
+  document.querySelector('.map-center')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  setTimeout(() => {
+    map.flyTo([lga.lat, lga.lng], 9, { duration: 0.8 });
+    const layer = lgaFocusLayer.getLayers().find(l => l.feature.properties.pcode === pcode);
+    if (layer) setTimeout(() => layer.openPopup([lga.lat, lga.lng]), 850);
+  }, 850);
+}
 
 // Opt-in layers (off by default); load boundaries once and feed both choropleths.
 fetch('vendor/nigeria-states.geojson')
   .then(r => r.json())
-  .then(geo => { bubbleLayer.addData(geo); deathsLayer.addData(geo); refreshChoropleth(); })
+  .then(geo => { bubbleLayer.addData(geo); deathsLayer.addData(geo); refreshChoropleth(); deathsLayer.setStyle(deathsChoroStyle); })
   .catch(err => console.error('Choropleth boundaries failed to load', err));
 
 function attackColor(a){
@@ -879,15 +1389,6 @@ const awsd2015 = awsdData.filter(d => d.year >= 2015);
 buildPoints(awsd2015);
 pointLayer.addTo(map);
 
-let heatLayer=L.layerGroup();
-stateData.forEach(d=>{
-  for(let i=0;i<Math.min(Math.ceil(d.deaths/250),18);i++){
-    const jlat=d.lat+(Math.random()-.5)*1.8;
-    const jlng=d.lng+(Math.random()-.5)*1.8;
-    L.circleMarker([jlat,jlng],{radius:3+Math.random()*5,fillColor:'#f85149',fillOpacity:.05+Math.random()*.13,color:'transparent',weight:0}).addTo(heatLayer);
-  }
-});
-
 const checkpointData = data.checkpoints || [];
 checkpointRecords = checkpointData;
 let checkpointLayer = L.markerClusterGroup({
@@ -930,31 +1431,63 @@ checkpointData.forEach(cp => {
   `).addTo(checkpointLayer);
 });
 
-const layers={deaths:deathsLayer,bubbles:bubbleLayer,points:pointLayer,heat:heatLayer,checkpoints:checkpointLayer};
-const layerState={deaths:false,bubbles:false,points:true,heat:false,checkpoints:false};
+const layers={acled:acledLayer,rising:risingLayer,live:liveLayer,deaths:deathsLayer,bubbles:bubbleLayer,points:pointLayer,lgaLines:lgaLinesLayer,displaced:displacedLayer,checkpoints:checkpointLayer};
+const layerState={acled:true,rising:true,live:true,deaths:false,bubbles:false,points:false,lgaLines:false,displaced:false,checkpoints:false};
+lgaFocusLayer.addTo(map);
+acledLayer.addTo(map);
+risingLayer.addTo(map);
+liveLayer.addTo(map);
+map.removeLayer(pointLayer);
 function toggleLayer(btn){
   const k=btn.dataset.layer;
   layerState[k]=!layerState[k];
   btn.classList.toggle('active',layerState[k]);
   layerState[k]?layers[k].addTo(map):map.removeLayer(layers[k]);
+  // Shading sits under the bubbles whichever was switched on last.
+  if(layerState[k] && (k==='deaths'||k==='bubbles'||k==='displaced')) layers[k].bringToBack();
+  if(k==='acled') refreshLgaFocus(dashWindow());
   updateLayerCount();
   syncLegend();
 }
 
-// Show only the legend sections whose layer is currently on; hide the whole
-// legend when nothing is active, and divide stacked sections.
+// Show only the legend sections whose layer is currently on, and divide
+// stacked sections.
 function syncLegend(){
   const legend=document.getElementById('mapLegend');
   if(!legend) return;
   let anyOn=false, firstShown=true;
   legend.querySelectorAll('.leg-section').forEach(sec=>{
-    const on=!!layerState[sec.dataset.legend];
+    const on = sec.dataset.legend==='lgaFocus' ? sec.dataset.on==='1' : !!layerState[sec.dataset.legend];
     sec.style.display = on ? '' : 'none';
     sec.classList.remove('leg-divided');
     if(on){ anyOn=true; if(!firstShown) sec.classList.add('leg-divided'); firstShown=false; }
   });
-  legend.style.display = anyOn ? '' : 'none';
+  document.getElementById('legEmpty').hidden = anyOn;
 }
+
+// The legend sits on the map and folds down to its title bar; the choice is
+// remembered for the next visit.
+const LEGEND_PREF = 'dashboard-legend-collapsed';
+function setLegendCollapsed(collapsed){
+  document.getElementById('mapLegendPanel').classList.toggle('collapsed', collapsed);
+  document.getElementById('mlgToggle').setAttribute('aria-expanded', String(!collapsed));
+}
+function toggleLegendPanel(){
+  const collapsed = !document.getElementById('mapLegendPanel').classList.contains('collapsed');
+  setLegendCollapsed(collapsed);
+  try { localStorage.setItem(LEGEND_PREF, collapsed ? '1' : '0'); } catch (error) { /* private mode */ }
+}
+// With no saved choice it starts open, unless the map is too short to spare the room.
+(function(){
+  let saved = null;
+  try { saved = localStorage.getItem(LEGEND_PREF); } catch (error) { /* private mode */ }
+  if (saved !== null) { setLegendCollapsed(saved === '1'); return; }
+  // Measured once the page has settled; the map is still being laid out here.
+  setTimeout(() => {
+    const mapHeight = document.querySelector('.map-wrap').offsetHeight;
+    setLegendCollapsed(mapHeight > 0 && mapHeight < 320);
+  }, 400);
+})();
 
 document.querySelectorAll('.toggle-btn').forEach(btn=>{
   btn.addEventListener('click',()=>toggleLayer(btn));
@@ -1002,19 +1535,39 @@ function resetFilters(){
 }
 
 function switchReportTab(name){
-  document.querySelectorAll('.lr-tab').forEach(t=>t.classList.toggle('active', t.dataset.lrtab===name));
-  const news=document.getElementById('lrPaneNews'), log=document.getElementById('lrPaneLog');
-  if(news) news.style.display = name==='news' ? 'flex' : 'none';
-  if(log) log.style.display = name==='log' ? 'flex' : 'none';
+  document.querySelectorAll('.lr-tab').forEach(t=>{
+    const on = t.dataset.lrtab===name;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', String(on));
+  });
+  [['brief','lrPaneBrief'],['news','lrPaneNews'],['log','lrPaneLog']].forEach(([key,id])=>{
+    const pane=document.getElementById(id);
+    if(pane) pane.style.display = name===key ? 'flex' : 'none';
+  });
 }
 
-// Global search — focuses the map on a matching state.
+// Global search — focuses the map on a matching state, or on the state of a
+// matching local government area.
 function handleGlobalSearch(value){
   const q=(value||'').trim().toLowerCase();
   if(q.length<3) return;
-  const match=stateData.find(s=>s.state.toLowerCase().includes(q));
-  if(match && typeof focusStateOnMap==='function'){
-    focusStateOnMap(match, match.state, `<div class="popup-row"><span>Deaths</span><span>${match.deaths.toLocaleString()}</span></div><div class="popup-row"><span>Incidents</span><span>${match.incidents}</span></div>`);
+  let match=stateData.find(s=>s.state.toLowerCase().includes(q));
+  let lga=null;
+  if(!match && acledHistory){
+    for(const row of acledHistory.states){
+      lga=row.lgas.find(item=>item.name.toLowerCase().includes(q));
+      if(lga){ match=stateObjectByName(row.state); break; }
+    }
+  }
+  if(!match) return;
+  selectDashState(match.state, true);
+  if(layerState.acled) setTimeout(()=>acledMarkers.get(match.state)?.openPopup(), 900);
+  if(lga){
+    const win=dashWindow(), yi=y=>acledHistory.years[y]>=win.from&&acledHistory.years[y]<=win.to;
+    const sum=series=>lga[series].reduce((t,v,i)=>yi(i)?t+v:t,0);
+    const pill=document.getElementById('infoPill');
+    pill.textContent=`${lga.name} LGA, ${match.state}: ${sum('fatalities').toLocaleString()} deaths in ${sum('events').toLocaleString()} incidents, ${windowText(win)}`;
+    setTimeout(()=>{pill.textContent='Click any marker for incident details · scroll to zoom';},8000);
   }
 }
 
@@ -1023,7 +1576,7 @@ let timePlayTimer=null;
 function onTimeSlider(value){
   const yr=parseInt(value,10);
   const lbl=document.getElementById('tsCurrent');
-  if(lbl) lbl.textContent = yr>=2026 ? 'All years' : `≤ ${yr}`;
+  if(lbl) lbl.textContent = yr>=HIST_LAST ? 'All years' : yr<=HIST_FIRST ? String(yr) : `${HIST_FIRST}–${yr}`;
   if(typeof applyTimeFilter==='function') applyTimeFilter(yr);
 }
 const TS_PLAY_PATH='M8 5v14l11-7z';
@@ -1040,14 +1593,20 @@ function toggleTimePlay(){
     return;
   }
   setPlayIcon(TS_PAUSE_PATH);
-  let yr=2004;
-  slider.value=2004; onTimeSlider(2004);
+  let yr=HIST_FIRST;
+  slider.value=yr; onTimeSlider(yr);
   timePlayTimer=setInterval(()=>{
     yr++;
-    if(yr>2026){ clearInterval(timePlayTimer); timePlayTimer=null; setPlayIcon(TS_PLAY_PATH); return; }
+    if(yr>HIST_LAST){ clearInterval(timePlayTimer); timePlayTimer=null; setPlayIcon(TS_PLAY_PATH); return; }
     slider.value=yr; onTimeSlider(yr);
-  }, 420);
+  }, 700);
 }
+(function(){
+  const slider=document.getElementById('timeSlider');
+  slider.min=HIST_FIRST; slider.max=HIST_LAST; slider.value=HIST_LAST;
+  document.getElementById('tsMin').textContent=HIST_FIRST;
+  document.getElementById('tsMax').textContent=HIST_LAST;
+})();
 
 // Default Leaflet layers control removed — the custom floating "Layers" panel
 // (top-right of the map) is the single layer control.
@@ -1076,6 +1635,13 @@ function renderFilterChips(){
     });
     wrap.appendChild(chip);
   });
+  if (dash.state) {
+    const chip = document.createElement('span');
+    chip.className = 'fchip';
+    chip.innerHTML = `State: ${escapeHtml(dash.state)} <button type="button" title="Show all states" aria-label="Show all states">&times;</button>`;
+    chip.querySelector('button').addEventListener('click', () => selectDashState(null));
+    wrap.appendChild(chip);
+  }
   // Severity chip (shown only when a subset of severities is active)
   const allSev = document.querySelectorAll('.sev-pill');
   const onSev = [...allSev].filter(p => p.classList.contains('active'));
@@ -1092,12 +1658,12 @@ function renderFilterChips(){
   }
 }
 
-let timeYearMax = 2026;
+let timeYearMax = HIST_LAST;
 function applyTimeFilter(yr){ timeYearMax = yr; applyFilters(); }
 
 function applyFilters(){
   const atk=document.getElementById('attackFilter').value;
-  const yr=document.getElementById('yearFilter').value;
+  const years=yearSelectRange();
   const act=document.getElementById('actorFilter').value;
   const sevs=activeSeverities();
   const f=awsdData.filter(d=>{
@@ -1105,10 +1671,7 @@ function applyFilters(){
     if(d.year>timeYearMax)ok=false;
     if(!sevs.has(deriveSeverity(d)))ok=false;
     if(atk!=='all'&&d.attack!==atk)ok=false;
-    if(yr==='2015+'&&d.year<2015)ok=false;
-    if(yr==='2022+'&&d.year<2022)ok=false;
-    if(yr==='2019-2021'&&(d.year<2019||d.year>2021))ok=false;
-    if(yr==='2015-2018'&&(d.year<2015||d.year>2018))ok=false;
+    if(d.year<years.from||d.year>years.to)ok=false;
     if(act==='Non-state'&&!d.actor.includes('Non-state'))ok=false;
     if(act==='Criminal'&&!d.actor.includes('Criminal'))ok=false;
     if(act==='Unknown'&&!d.actor.includes('Unknown'))ok=false;
@@ -1128,7 +1691,6 @@ function applyFilters(){
   f.forEach(d => { const n = normState(d.region); choroCounts.set(n, (choroCounts.get(n) || 0) + 1); });
   choroMax = Math.max(1, ...choroCounts.values());
   refreshChoropleth();
-  buildStateBars(choroCounts);
 
   // Charts reflect the filtered set
   chartFilterSet = f;
@@ -1138,27 +1700,38 @@ function applyFilters(){
   const states=new Set(f.map(d=>d.region)).size;
   const mk=document.getElementById('matchKpi'); if(mk) mk.textContent=f.length.toLocaleString();
   const ms=document.getElementById('matchKpiSub'); if(ms) ms.textContent=`of ${awsdData.length.toLocaleString()} · ${states} states`;
-  const mc=document.getElementById('mapCountNote'); if(mc) mc.textContent=`Showing ${f.length.toLocaleString()} geolocated incidents`;
+  refreshAcledViews();
 }
 renderFilterChips();
 
-// STATE BARS
-// STATE BARS — top states by filtered aid-incident count (pairs with the choropleth)
+// STATE BARS — top states by the active ACLED metric, or the most affected
+// local government areas once a state is in focus.
 const sbEl=document.getElementById('stateRankBars');
 function barClass(i){return i<2?'bar-critical':i<5?'bar-high':'bar-elevated';}
-function buildStateBars(countsMap){
-  const entries=[...countsMap.entries()]
-    .filter(([norm,count])=>count>0 && stateMetaByNorm.has(norm))
-    .map(([norm,count])=>({name:stateMetaByNorm.get(norm).state, count}))
-    .sort((a,b)=>b.count-a.count)
-    .slice(0,10);
-  if(!entries.length){ sbEl.innerHTML='<div class="h-bar-empty">No incidents match the current filter.</div>'; return; }
+function renderStateBars(win, values){
+  const def=DASH_METRICS[dash.metric];
+  const title=document.getElementById('stateBarsTitle');
+  const live=liveArticlesByState();
+  let entries;
+  if(dash.state && acledHistory){
+    title.textContent=`Top LGAs in ${dash.state} — ${def.title.toLowerCase()}`;
+    entries=histTopLgas(dash.state, def.series, win.from, win.to, 10).map(lga=>({name:lga.name,count:lga.value}));
+  }else{
+    title.textContent=`Top states — ${def.title.toLowerCase()}`;
+    entries=[...values.entries()].filter(([,count])=>count>0)
+      .map(([name,count])=>({name,count,state:name,live:(live.get(name)||[]).length}))
+      .sort((a,b)=>b.count-a.count).slice(0,10);
+  }
+  if(!entries.length){ sbEl.innerHTML=`<div class="h-bar-empty">No ${def.title.toLowerCase()} recorded for ${windowText(win)}.</div>`; return; }
   const maxC=entries[0].count;
   sbEl.innerHTML='';
   entries.forEach((d,i)=>{
-    const pct=Math.round((d.count/maxC)*100);
-    sbEl.innerHTML+=`<div class="h-bar-row"><span class="h-bar-lbl">${escapeHtml(d.name)}</span><div class="h-bar-track"><div class="h-bar-fill ${barClass(i)}"><span class="h-bar-val">${d.count}</span></div></div></div>`;
-    sbEl.lastElementChild.querySelector('.h-bar-fill').style.width=`${pct}%`;
+    const pct=Math.max(8,Math.round((d.count/maxC)*100));
+    const liveChip=d.live?`<span class="h-bar-live" title="${d.live} live news report${d.live===1?'':'s'} naming ${escapeHtml(d.name)}">+${d.live} live</span>`:'';
+    sbEl.insertAdjacentHTML('beforeend',`<div class="h-bar-row${d.state?' is-click':''}"${d.state?` data-state="${escapeHtml(d.state)}" title="Focus ${escapeHtml(d.name)} on the map"`:''}><span class="h-bar-lbl">${escapeHtml(shortStateName(d.name))}</span><div class="h-bar-track"><div class="h-bar-fill" style="width:${pct}%;background:${heatColor(Math.sqrt(d.count/maxC))}"><span class="h-bar-val" style="color:${heatTextColor(Math.sqrt(d.count/maxC))}">${d.count.toLocaleString()}</span></div></div>${liveChip}</div>`);
+  });
+  sbEl.querySelectorAll('.h-bar-row.is-click').forEach(row=>{
+    row.addEventListener('click',()=>selectDashState(row.dataset.state, true));
   });
 }
 
@@ -1192,7 +1765,7 @@ Chart.defaults.font.family='Segoe UI, sans-serif';
 trendChart = new Chart(document.getElementById('trendChart'),{
   type:'bar',
   data:{labels:[],datasets:[]},
-  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true,labels:{color:tc,font:{size:10}}}},scales:{x:{grid:{color:gc},ticks:{color:tc,font:{size:10}}},y:{beginAtZero:true,grid:{color:gc},ticks:{color:tc,font:{size:10},precision:0}}}}
+  options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{display:true,labels:{color:tc,boxWidth:10,font:{size:10}}}},scales:{x:{grid:{display:false},ticks:{color:tc,font:{size:10},maxRotation:0,autoSkip:true}},y:{beginAtZero:true,position:'left',grid:{color:gc},ticks:{color:tc,font:{size:10},precision:0}},y1:{beginAtZero:true,position:'right',grid:{display:false},ticks:{color:'#ff5a5f',font:{size:10},precision:0}}}}
 });
 
 attackDonutChart = new Chart(document.getElementById('attackDonut'),{
@@ -1207,33 +1780,76 @@ monthBarChart = new Chart(document.getElementById('monthBar'),{
   options:{
     responsive:true,
     maintainAspectRatio:false,
-    onClick: (_, elements, chart)=>{
-      if (!elements.length) return;
-      const clickedLabel = chart.data.labels[elements[0].index];
-      const stateName = clickedLabel === 'Abuja' ? 'FCT (Abuja)' : clickedLabel;
-      const state = stateObjectByName(stateName);
-      const pill = document.getElementById('infoPill');
-      const mapPanel = document.querySelector('.map-center');
-      if (!state) return;
-      mapPanel?.scrollIntoView({behavior:'smooth', block:'center'});
-      focusStateOnMap(
-        state,
-        `Geographic Comparison - ${clickedLabel}`,
-        `
-          <div class="popup-row"><span>State</span><span>${escapeHtml(clickedLabel)}</span></div>
-          <div class="popup-detail">This state is currently highlighted from the Geographic Comparison chart.</div>
-        `
-      );
-      pill.textContent = `Geographic Comparison focused on ${clickedLabel}.`;
-      setTimeout(()=>{pill.textContent='Click any marker for incident details. Scroll to zoom.';},5000);
-    },
     plugins:{legend:{display:true,labels:{color:tc,boxWidth:10,font:{size:9}}}},
     scales:{x:{grid:{display:false},ticks:{color:tc,font:{size:9}}},y:{beginAtZero:true,grid:{color:gc},ticks:{color:tc,font:{size:9},precision:0}}}
   }
 });
 
-// Unify the initial render: points, feed, choropleth counts, state bars, charts
+// Reset view: everything back to how the page opens, without reloading it
+// (the live feed, briefing and watchlist are kept).
+const LAYER_DEFAULTS = { ...layerState };
+function resetDashboard(){
+  if (timePlayTimer) toggleTimePlay();
+  document.querySelector('.map-max')?.querySelector('.map-max-btn')?.click();
+  showView('dashboard');
+  // Filters, year window and time slider
+  ['attackFilter','yearFilter','actorFilter'].forEach(id => { document.getElementById(id).value = FILTER_DEFAULTS[id]; });
+  document.querySelectorAll('.sev-pill').forEach(p => p.classList.add('active'));
+  const slider = document.getElementById('timeSlider');
+  slider.value = HIST_LAST;
+  document.getElementById('tsCurrent').textContent = 'All years';
+  timeYearMax = HIST_LAST;
+  // Metric, state in focus, layers
+  dash.metric = 'deaths';
+  dash.state = null;
+  document.querySelectorAll('.toggle-btn[data-layer]').forEach(btn => {
+    if (layerState[btn.dataset.layer] !== LAYER_DEFAULTS[btn.dataset.layer]) toggleLayer(btn);
+  });
+  document.getElementById('mapLayersPanel')?.classList.remove('collapsed');
+  setLegendCollapsed(false);
+  try { localStorage.removeItem(LEGEND_PREF); } catch (error) { /* private mode */ }
+  // Map, panels and search
+  liveReportLayer.clearLayers();
+  if (userReportLayer) userReportLayer.clearLayers();
+  map.closePopup();
+  map.flyTo(MAP_HOME.center, MAP_HOME.zoom, { duration: 0.8 });
+  document.getElementById('globalSearch').value = '';
+  document.querySelectorAll('#liveNewsFeed .news-item.active').forEach(n => n.classList.remove('active'));
+  switchReportTab('brief');
+  applyFilters();
+  showToast('View reset to the defaults.', 'info');
+}
+Object.assign(window, { resetDashboard });
+
+// Live news badges and the "+n live" marks in the state ranking follow each
+// refresh of the feed (called from renderLiveNews).
+window.onDashboardLiveUpdate = () => { refreshLiveLayer(); refreshAcledViews(); };
+Object.assign(window, { focusLga });
+
+// LGA names, outlines, displacement and citizen reports load in the
+// background (insights.js); everything that uses them redraws once they arrive.
+startInsights(() => {
+  fillLgaLayers();
+  refreshRisingLayer();
+  liveArticles.forEach(article => { article.incident = extractNewsIncident(article); });
+  refreshLiveLayer();
+  refreshAcledViews();
+});
+
+// Credit line under the map.
+(function(){
+  const el=document.getElementById('mapSource');
+  if(!el) return;
+  const aid='Aid worker records: Aid Worker Security Database.';
+  if(!acledHistory){ el.textContent=`ACLED history file not loaded; showing stored state totals. ${aid}`; return; }
+  const m=acledHistory.meta;
+  const asOf=new Date(`${m.asOf}T00:00:00`).toLocaleDateString([], {day:'numeric',month:'short',year:'numeric'});
+  el.innerHTML=`Deaths and incidents: <a href="${escapeHtml(m.sourceUrl)}" target="_blank" rel="noopener noreferrer">ACLED via HDX</a>, political violence, ${histCoverageText()} (data as of ${escapeHtml(asOf)}; latest month incomplete). LGA boundaries: OCHA. Displacement: IOM DTM. ${aid}`;
+})();
+
+// Unify the initial render: points, feed, bubbles, shading, state bars, charts
 // and KPIs all reflect the default filter from the start.
+refreshLiveLayer();
 applyFilters();
 
 }
@@ -1356,8 +1972,7 @@ function showView(view) {
   const dash = view === 'dashboard';
   document.querySelector('.layout').style.display = dash ? (window.innerWidth <= 768 ? 'flex' : 'grid') : 'none';
   document.querySelector('.kpi-row').style.display = dash ? '' : 'none';
-  document.querySelector('.charts-row').style.display = dash ? '' : 'none';
-  document.getElementById('hotspotView').style.display = view === 'hotspot' ? 'block' : 'none';
+  document.getElementById('hotspotView').style.display = view === 'hotspot' ? 'flex' : 'none';
   document.getElementById('travelView').classList.toggle('tv-active', view === 'travel');
   document.getElementById('topbarDashboardInfo').style.display = dash ? '' : 'none';
   document.getElementById('topbarHotspotInfo').style.display = view === 'hotspot' ? '' : 'none';
