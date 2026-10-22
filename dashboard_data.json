@@ -2,47 +2,47 @@
   "meta": {
     "title": "Nigeria Crime & Security GIS Dashboard",
     "subtitle": "ACLED General Incidents + AWSD Aid Worker Security Data - Merged",
-    "dateRange": "2004-2026",
-    "sourceNote": "General incidents and aid worker security records loaded from dashboard_data.json"
+    "dateRange": "2015-2026",
+    "sourceNote": "State deaths and incidents are ACLED totals for 2015 to October 2026 (see acled_history.json, built by build_acled_history.py). Aid worker records are AWSD."
   },
   "stateData": [
-  {"state":"Borno","lat":11.8333,"lng":13.151,"deaths":5719,"incidents":315},
-  {"state":"Kaduna","lat":10.5105,"lng":7.4165,"deaths":2577,"incidents":462},
-  {"state":"Zamfara","lat":12.1704,"lng":6.6654,"deaths":2531,"incidents":204},
-  {"state":"Niger","lat":9.9309,"lng":5.5983,"deaths":2454,"incidents":325},
-  {"state":"Benue","lat":7.3369,"lng":8.7406,"deaths":2089,"incidents":327},
-  {"state":"Katsina","lat":12.9816,"lng":7.616,"deaths":2053,"incidents":226},
-  {"state":"Plateau","lat":9.2182,"lng":9.5179,"deaths":1500,"incidents":269},
-  {"state":"Lagos","lat":6.5244,"lng":3.3792,"deaths":1056,"incidents":624},
-  {"state":"Ogun","lat":6.998,"lng":3.4737,"deaths":977,"incidents":484},
-  {"state":"Anambra","lat":6.2104,"lng":7.0,"deaths":895,"incidents":280},
-  {"state":"Bauchi","lat":10.7764,"lng":9.9999,"deaths":820,"incidents":183},
-  {"state":"Imo","lat":5.4927,"lng":7.0259,"deaths":750,"incidents":202},
-  {"state":"Delta","lat":5.7035,"lng":5.9328,"deaths":741,"incidents":347},
-  {"state":"Taraba","lat":8.0,"lng":11.0,"deaths":723,"incidents":100},
-  {"state":"FCT (Abuja)","lat":9.0765,"lng":7.3986,"deaths":687,"incidents":290},
-  {"state":"Sokoto","lat":13.0059,"lng":5.2476,"deaths":682,"incidents":97},
-  {"state":"Kogi","lat":7.7337,"lng":6.6906,"deaths":659,"incidents":157},
-  {"state":"Rivers","lat":4.8396,"lng":6.9,"deaths":632,"incidents":235},
-  {"state":"Kano","lat":12.0,"lng":8.5,"deaths":621,"incidents":171},
-  {"state":"Jigawa","lat":12.2279,"lng":9.5616,"deaths":560,"incidents":93},
-  {"state":"Kwara","lat":8.9669,"lng":4.3873,"deaths":520,"incidents":190},
-  {"state":"Yobe","lat":12.0,"lng":11.5,"deaths":531,"incidents":68},
-  {"state":"Adamawa","lat":9.3265,"lng":12.3984,"deaths":503,"incidents":84},
-  {"state":"Enugu","lat":6.5244,"lng":7.5138,"deaths":500,"incidents":151},
-  {"state":"Kebbi","lat":11.4942,"lng":4.2333,"deaths":472,"incidents":88},
-  {"state":"Abia","lat":5.4527,"lng":7.5248,"deaths":468,"incidents":129},
-  {"state":"Oyo","lat":8.0,"lng":3.947,"deaths":464,"incidents":176},
-  {"state":"Ondo","lat":6.9149,"lng":5.1478,"deaths":464,"incidents":200},
-  {"state":"Edo","lat":6.3636,"lng":5.6,"deaths":459,"incidents":210},
-  {"state":"Nasarawa","lat":8.4965,"lng":8.1997,"deaths":396,"incidents":104},
-  {"state":"Ebonyi","lat":6.2649,"lng":8.0137,"deaths":323,"incidents":134},
-  {"state":"Bayelsa","lat":4.9057,"lng":6.0,"deaths":300,"incidents":84},
-  {"state":"Osun","lat":7.5629,"lng":4.52,"deaths":300,"incidents":122},
-  {"state":"Akwa Ibom","lat":4.9057,"lng":7.8537,"deaths":197,"incidents":106},
-  {"state":"Cross River","lat":5.8701,"lng":8.5988,"deaths":194,"incidents":61},
-  {"state":"Ekiti","lat":7.719,"lng":5.311,"deaths":117,"incidents":65},
-  {"state":"Gombe","lat":10.2897,"lng":11.1673,"deaths":105,"incidents":44}
+  {"state":"Borno","lat":11.8333,"lng":13.151,"deaths":39198,"incidents":5949},
+  {"state":"Kaduna","lat":10.5105,"lng":7.4165,"deaths":6875,"incidents":2532},
+  {"state":"Zamfara","lat":12.1704,"lng":6.6654,"deaths":12122,"incidents":3324},
+  {"state":"Niger","lat":9.9309,"lng":5.5983,"deaths":6752,"incidents":1790},
+  {"state":"Benue","lat":7.3369,"lng":8.7406,"deaths":5629,"incidents":1662},
+  {"state":"Katsina","lat":12.9816,"lng":7.616,"deaths":7177,"incidents":3134},
+  {"state":"Plateau","lat":9.2182,"lng":9.5179,"deaths":4299,"incidents":1484},
+  {"state":"Lagos","lat":6.5244,"lng":3.3792,"deaths":806,"incidents":893},
+  {"state":"Ogun","lat":6.998,"lng":3.4737,"deaths":569,"incidents":547},
+  {"state":"Anambra","lat":6.2104,"lng":7.0,"deaths":1258,"incidents":796},
+  {"state":"Bauchi","lat":10.7764,"lng":9.9999,"deaths":482,"incidents":295},
+  {"state":"Imo","lat":5.4927,"lng":7.0259,"deaths":1034,"incidents":694},
+  {"state":"Delta","lat":5.7035,"lng":5.9328,"deaths":1132,"incidents":1028},
+  {"state":"Taraba","lat":8.0,"lng":11.0,"deaths":2311,"incidents":753},
+  {"state":"FCT (Abuja)","lat":9.0765,"lng":7.3986,"deaths":551,"incidents":728},
+  {"state":"Sokoto","lat":13.0059,"lng":5.2476,"deaths":3553,"incidents":1698},
+  {"state":"Kogi","lat":7.7337,"lng":6.6906,"deaths":1009,"incidents":769},
+  {"state":"Rivers","lat":4.8396,"lng":6.9,"deaths":1070,"incidents":807},
+  {"state":"Kano","lat":12.0,"lng":8.5,"deaths":365,"incidents":319},
+  {"state":"Jigawa","lat":12.2279,"lng":9.5616,"deaths":116,"incidents":132},
+  {"state":"Kwara","lat":8.9669,"lng":4.3873,"deaths":895,"incidents":650},
+  {"state":"Yobe","lat":12.0,"lng":11.5,"deaths":2460,"incidents":614},
+  {"state":"Adamawa","lat":9.3265,"lng":12.3984,"deaths":2443,"incidents":619},
+  {"state":"Enugu","lat":6.5244,"lng":7.5138,"deaths":577,"incidents":529},
+  {"state":"Kebbi","lat":11.4942,"lng":4.2333,"deaths":1381,"incidents":511},
+  {"state":"Abia","lat":5.4527,"lng":7.5248,"deaths":719,"incidents":344},
+  {"state":"Oyo","lat":8.0,"lng":3.947,"deaths":367,"incidents":434},
+  {"state":"Ondo","lat":6.9149,"lng":5.1478,"deaths":335,"incidents":464},
+  {"state":"Edo","lat":6.3636,"lng":5.6,"deaths":676,"incidents":721},
+  {"state":"Nasarawa","lat":8.4965,"lng":8.1997,"deaths":999,"incidents":524},
+  {"state":"Ebonyi","lat":6.2649,"lng":8.0137,"deaths":714,"incidents":364},
+  {"state":"Bayelsa","lat":4.9057,"lng":6.0,"deaths":365,"incidents":325},
+  {"state":"Osun","lat":7.5629,"lng":4.52,"deaths":328,"incidents":418},
+  {"state":"Akwa Ibom","lat":4.9057,"lng":7.8537,"deaths":498,"incidents":313},
+  {"state":"Cross River","lat":5.8701,"lng":8.5988,"deaths":801,"incidents":385},
+  {"state":"Ekiti","lat":7.719,"lng":5.311,"deaths":108,"incidents":199},
+  {"state":"Gombe","lat":10.2897,"lng":11.1673,"deaths":259,"incidents":113}
 ],
   "awsdData": [
   {"lat":9.6,"lng":8.0,"region":"Unknown","city":"","killed":0,"wounded":3,"kidnapped":0,"affected":3,"attack":"Kidnapping","actor":"Unknown","motive":"Unknown","context":"Ambush","year":2004,"details":"3 INGO national staff ambushed, robbed and carjacked on road."},
@@ -192,8 +192,8 @@
   ],
   "charts": {
     "annualDeaths": {
-      "labels": ["2022", "2023", "2024", "2025*"],
-      "data": [8391, 11917, 12238, 2806]
+      "labels": ["2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025", "2026*"],
+      "data": [11075, 4826, 4912, 6087, 5925, 8420, 10943, 10929, 8718, 10243, 15771, 12384]
     },
     "attackTypes": {
       "labels": ["Kidnapping", "Shooting", "Assault", "Kidnap-kill", "Other"],
@@ -201,7 +201,7 @@
     },
     "monthlyIncidents": {
       "labels": ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"],
-      "data": [676, 554, 663, 540, 472, 574, 683, 735, 728, 681, 631, 562]
+      "data": [3365, 2965, 3285, 3489, 3422, 3186, 3184, 3284, 3074, 2467, 2540, 2600]
     }
   }
 }

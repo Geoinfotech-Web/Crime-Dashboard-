@@ -1,6 +1,7 @@
 import argparse
 import shutil
 import csv
+import html
 import threading
 import time
 from collections import defaultdict, deque
@@ -14,11 +15,11 @@ from email.utils import parsedate_to_datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse
 from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 
-from route_news import FOREIGN_RE, build_route_news
+from route_news import FOREIGN_RE, STOPWORDS, build_route_news
 from route_roads import build_road_route
 
 
@@ -215,6 +216,104 @@ def build_gdelt_url(config):
     return f'{config["endpoint"]}?{urlencode(params)}'
 
 
+# --- Repeated stories -------------------------------------------------------
+# The same story reaches the feed several times: once from the outlet's own
+# RSS and again through each Google News search, with tracking added to the
+# link, or rewritten slightly by another outlet. Only one copy is published.
+TRACKING_PARAMS = re.compile(r"^(utm_|fbclid$|gclid$|igshid$|mc_|ref$|ref_|source$|share$|amp$|oc$|ocid$|cmpid$|ved$|usg$|hl$|gl$|ceid$)")
+OUTLET_SUFFIX = re.compile(r"\s+[-|\u2013\u2014]\s+([^-|\u2013\u2014]{2,40})$")
+SAME_STORY_HOURS = 48
+
+
+def canonical_url(url: str) -> str:
+    """The link without scheme, www/mobile prefix, tracking or trailing slash."""
+    parsed = urlparse((url or "").strip())
+    host = re.sub(r"^(www|m|mobile|amp)\.", "", parsed.netloc.lower())
+    path = re.sub(r"/(amp/?)?$", "", parsed.path)
+    query = sorted((key, value) for key, value in parse_qsl(parsed.query)
+                   if not TRACKING_PARAMS.match(key.lower()))
+    return f"{host}{path}?{urlencode(query)}" if query else f"{host}{path}"
+
+
+def split_outlet(title: str):
+    """('Headline', 'Outlet') for a 'Headline - Outlet' title, else (title, '')."""
+    title = html.unescape(title or "").strip()
+    match = OUTLET_SUFFIX.search(title)
+    if match and len(title) - len(match.group(0)) >= 20:
+        return title[:match.start()].strip(), match.group(1).strip()
+    return title, ""
+
+
+def title_key(headline: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", headline.lower()).strip()
+
+
+def title_tokens(headline: str):
+    """Significant words cut to five letters, so 'kidnapped' and 'kidnappers' match."""
+    return {word[:5] for word in re.findall(r"[a-z]{3,}", headline.lower()) if word not in STOPWORDS}
+
+
+def same_story(a, b) -> bool:
+    shared = len(a["tokens"] & b["tokens"])
+    smaller = min(len(a["tokens"]), len(b["tokens"]))
+    if shared < 4 or shared / smaller < 0.75:
+        return False
+    if a["published"] and b["published"]:
+        return abs((a["published"] - b["published"]).total_seconds()) <= SAME_STORY_HOURS * 3600
+    return True
+
+
+def dedupe_articles(articles):
+    """Drop repeats of a story, keeping one copy that lists who else ran it.
+
+    Two articles are the same story when they share a link (ignoring
+    tracking), a headline (ignoring the ' - Outlet' ending), or nearly all the
+    significant words of their headlines within 48 hours. The copy kept is the
+    outlet's own link where there is one, otherwise the earliest.
+    Returns (kept, number_removed).
+    """
+    entries = []
+    for article in articles:
+        headline, outlet = split_outlet(article.get("title", ""))
+        url = article.get("url", "")
+        entries.append({
+            "article": article,
+            "url": canonical_url(url),
+            "title": title_key(headline),
+            "tokens": title_tokens(headline),
+            "published": parse_feed_date(article.get("seenDate") or ""),
+            "aggregated": "news.google.com" in url,
+            "outlet": outlet or article.get("domain") or article.get("source") or "",
+        })
+
+    oldest = datetime.min.replace(tzinfo=timezone.utc)
+    entries.sort(key=lambda e: (e["aggregated"], e["published"] or oldest))
+
+    kept, by_url, by_title = [], {}, {}
+    for entry in entries:
+        match = by_url.get(entry["url"]) or (entry["title"] and by_title.get(entry["title"]))
+        if not match:
+            match = next((other for other in kept if same_story(entry, other)), None)
+        if match:
+            match["repeats"].append(entry["outlet"])
+            continue
+        entry["repeats"] = []
+        kept.append(entry)
+        by_url[entry["url"]] = entry
+        if entry["title"]:
+            by_title[entry["title"]] = entry
+
+    result = []
+    for entry in kept:
+        article = dict(entry["article"])
+        own = entry["outlet"].lower()
+        others = sorted({name for name in entry["repeats"] if name and name.lower() != own})
+        article["alsoReportedBy"] = others
+        article["duplicateCount"] = len(entry["repeats"])
+        result.append(article)
+    return result, len(entries) - len(kept)
+
+
 def extract_feed_items(feed, keywords, location_keywords, pattern_cache, cutoff):
     xml_bytes = fetch_feed(feed["url"])
     nodes = feed_items(xml_bytes.decode("utf-8", errors="replace"))
@@ -304,12 +403,10 @@ def build_rss_news(root: Path):
             except Exception as exc:
                 errors.append(f'{feed.get("name", "feed")}: {exc}')
 
-    deduped = {}
-    for item in items:
-        deduped[item["url"]] = item
+    deduped, duplicates_removed = dedupe_articles(items)
 
     sorted_items = sorted(
-        deduped.values(),
+        deduped,
         key=lambda item: parse_feed_date(item.get("seenDate") or "") or datetime.min.replace(tzinfo=timezone.utc),
         reverse=True,
     )[:max_items]
@@ -320,6 +417,7 @@ def build_rss_news(root: Path):
         "refreshMinutes": refresh_minutes,
         "lookbackHours": lookback_hours,
         "articles": sorted_items,
+        "duplicatesRemoved": duplicates_removed,
         "warnings": errors,
     }
 
@@ -334,6 +432,10 @@ def build_live_news(root: Path):
     lookback_hours = max(1, int(str(config.get("timespan", "24h")).rstrip("h")))
     try:
         payload = fetch_json(build_gdelt_url(config))
+        # GDELT calls the publication time "seendate".
+        for article in payload.get("articles", []):
+            article.setdefault("seenDate", article.get("seendate", ""))
+        payload["articles"], payload["duplicatesRemoved"] = dedupe_articles(payload.get("articles", []))
         payload["provider"] = "gdelt"
         payload["sourceMode"] = "gdelt"
         payload["refreshMinutes"] = int(config.get("refreshMinutes", 15))
@@ -369,8 +471,10 @@ def build_cached_live_news(root: Path):
                 }
             )
 
+    articles, duplicates_removed = dedupe_articles(
+        [article for article in articles if article["title"] and article["url"]])
     articles = sorted(
-        [article for article in articles if article["title"] and article["url"]],
+        articles,
         key=lambda article: parse_feed_date(article.get("seenDate") or "") or datetime.min.replace(tzinfo=timezone.utc),
         reverse=True,
     )[:20]
@@ -388,6 +492,7 @@ def build_cached_live_news(root: Path):
         "lookbackHours": 24,
         "refreshedAt": refreshed_at,
         "articles": articles,
+        "duplicatesRemoved": duplicates_removed,
     }
 
 

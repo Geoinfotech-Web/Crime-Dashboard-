@@ -1194,6 +1194,25 @@ function renderTravelRecs(corr, departHour, dep, risks, labels){
     add('road', 'r-orange', 'ti-news-off', `<strong>This week's reports are not in yet.</strong> The guide below rests on the road's baseline risk until the news sources answer.`);
   }
 
+  // ── Rising now along the route, and the season of the trip
+  if (typeof risingNow === 'function'){
+    const rising = risingNow().filter(item => corr.states.includes(item.state)).slice(0, 3);
+    if (rising.length){
+      add('road', 'r-orange', 'ti-trending-up', `<strong>Incidents are rising in ${rising.map(item => `${escapeHtml(item.name)} (${escapeHtml(item.state)})`).join(', ')}.</strong> ${escapeHtml(rising[0].name)} alone had ${escapeHtml(risingExplain(rising[0]))}. Avoid detours through these areas.`);
+    }
+  }
+  if (typeof seasonalIndex === 'function'){
+    const dateValue = document.getElementById('tvDate')?.value;
+    const month = (dateValue ? new Date(`${dateValue}T12:00:00`) : new Date()).getMonth();
+    const busy = corr.states
+      .map(state => ({ state, pct: Math.round(((seasonalIndex(state) || [])[month] - 1) * 100) }))
+      .filter(item => item.pct >= 15)
+      .sort((a, b) => b.pct - a.pct);
+    if (busy.length){
+      add('timing', 'r-orange', 'ti-calendar-stats', `<strong>${MONTH_NAMES[month]} is usually a busier month on this route:</strong> ${busy.slice(0, 3).map(item => `${escapeHtml(item.state)} +${item.pct}%`).join(', ')} above its average month (${escapeHtml(seasonalYears())}).`);
+    }
+  }
+
   // ── When to travel
   if (dep.tooLong){
     const stop = corr.via[Math.floor(corr.via.length / 2)];
