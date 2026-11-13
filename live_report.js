@@ -32,13 +32,7 @@ function openLiveReport() {
   document.body.style.overflow = 'hidden';
   attachLiveReportListeners();
   updateSubmitSummary();
-  setTimeout(() => {
-    if (miniMap) miniMap.invalidateSize();
-    const prompt = document.getElementById('locationPrompt');
-    if (!currentPosition && prompt && prompt.style.display !== 'none') {
-      requestLocation();
-    }
-  }, 300);
+  setTimeout(() => { if (miniMap) miniMap.invalidateSize(); }, 300);
 }
 
 function closeLiveReport() {
@@ -53,6 +47,15 @@ function lrHandleBackdrop(event) {
   if (event.target === document.getElementById('liveReportModal')) {
     closeLiveReport();
   }
+}
+
+function toggleReportMedia(button) {
+  const form = document.getElementById('reportForm');
+  const expanded = !form.classList.contains('mobile-media-expanded');
+  form.classList.toggle('mobile-media-expanded', expanded);
+  button.setAttribute('aria-expanded', String(expanded));
+  const label = button.querySelector('span');
+  if (label) label.textContent = expanded ? 'Hide photo and video options' : 'Add photo or video (optional)';
 }
 
 /* ── Location ── */

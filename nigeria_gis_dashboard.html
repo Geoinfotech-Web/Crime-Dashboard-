@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Nigeria GIS - Crime and Security Incidents Dashboard</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <link rel="stylesheet" href="vendor/tabler-icons/tabler-icons.min.css"/>
@@ -40,14 +40,14 @@
   </div>
 
   <div class="topbar-actions">
-    <button class="icon-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Switch theme"><i class="ti ti-sun-high"></i></button>
-    <button class="icon-btn icon-btn-badge" onclick="openReportsViewer()" title="View submitted reports"><i class="ti ti-clipboard-list"></i><span class="icon-badge" id="rvMenuBadge" style="display:none"></span></button>
-    <a class="icon-btn" href="live_rss_news_export.csv" download title="Export live report feed (CSV)"><i class="ti ti-download"></i></a>
+    <button class="icon-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Switch theme" aria-label="Switch theme"><i class="ti ti-sun-high"></i></button>
+    <button class="icon-btn icon-btn-badge" onclick="openReportsViewer()" title="View submitted reports" aria-label="View submitted reports"><i class="ti ti-clipboard-list"></i><span class="icon-badge" id="rvMenuBadge" style="display:none"></span></button>
+    <a class="icon-btn topbar-export" href="live_rss_news_export.csv" download title="Export live report feed (CSV)" aria-label="Export live report feed as CSV"><i class="ti ti-download"></i></a>
   </div>
 </header>
 
 <!-- ═══ NAV TABS ═══ -->
-<nav class="navtabs" id="navTabs">
+<nav class="navtabs" id="navTabs" aria-label="Primary navigation">
   <div class="navtabs-left">
     <button class="nav-tab active" data-view="dashboard" onclick="navTo('dashboard')"><i class="ti ti-layout-dashboard"></i><span>Dashboard</span></button>
     <button class="nav-tab" data-view="hotspot" onclick="navTo('hotspot')"><i class="ti ti-flame"></i><span>Hotspot Analysis</span></button>
@@ -97,11 +97,14 @@
       <div class="gkpi-sub" id="aidKpiSub">AWSD records</div>
     </div>
   </div>
+  <button type="button" class="mobile-disclosure mobile-kpi-toggle" aria-expanded="false" aria-controls="dashKpiRow" onclick="toggleMobileStats(this)">
+    <i class="ti ti-chart-bar"></i><span>More statistics</span><i class="ti ti-chevron-down disclosure-caret"></i>
+  </button>
 
   <!-- LEFT: LIVE INTELLIGENCE, then FILTERS & CONTROLS -->
   <aside class="left-panel">
     <div class="panel-card panel-card-flex intel-card">
-      <div class="panel-card-hd"><i class="ti ti-broadcast"></i> Live Intelligence</div>
+      <div class="panel-card-hd"><i class="ti ti-broadcast"></i> Live updates</div>
       <div class="lr-tabs" role="tablist">
         <button class="lr-tab active" role="tab" aria-selected="true" data-lrtab="brief" onclick="switchReportTab('brief')">Briefing</button>
         <button class="lr-tab" role="tab" aria-selected="false" data-lrtab="news" onclick="switchReportTab('news')">News</button>
@@ -118,7 +121,10 @@
         <div class="incident-feed" id="incidentFeed"></div>
       </div>
     </div>
-    <div class="panel-card filters-card">
+    <button type="button" class="mobile-disclosure mobile-filter-toggle" aria-expanded="false" aria-controls="dashboardFilters" onclick="toggleMobileFilters(this)">
+      <i class="ti ti-adjustments-horizontal"></i><span>Filter the map</span><i class="ti ti-chevron-down disclosure-caret"></i>
+    </button>
+    <div class="panel-card filters-card" id="dashboardFilters">
       <div class="panel-card-hd"><i class="ti ti-adjustments-horizontal"></i> Filters &amp; Controls</div>
 
       <div class="filter-group">
@@ -175,9 +181,10 @@
 
   <!-- CENTER: MAP -->
   <section class="map-center">
-    <div class="panel-hd map-hd"><span><i class="ti ti-map-2"></i> Incident Intensity Map</span><span class="map-hd-right"><span class="seg-control map-metric" id="mapMetric" role="group" aria-label="Bubble size shows"><button type="button" class="seg-btn active" data-metric="deaths" aria-pressed="true" onclick="setDashMetric('deaths')">Deaths</button><button type="button" class="seg-btn" data-metric="incidents" aria-pressed="false" onclick="setDashMetric('incidents')">Incidents</button></span><span class="map-hd-note" id="mapCountNote">Showing geolocated incidents</span><button class="map-max-btn" onclick="toggleMapMax(this)" title="Maximize map"><i class="ti ti-maximize"></i></button></span></div>
+    <div class="panel-hd map-hd"><span><i class="ti ti-map-2"></i> Security overview</span><span class="map-hd-right"><span class="seg-control map-metric" id="mapMetric" role="group" aria-label="Map shows"><button type="button" class="seg-btn active" data-metric="deaths" aria-pressed="true" onclick="setDashMetric('deaths')">Deaths</button><button type="button" class="seg-btn" data-metric="incidents" aria-pressed="false" onclick="setDashMetric('incidents')">Incidents</button></span><span class="map-hd-note" id="mapCountNote">Showing geolocated incidents</span><button class="map-max-btn" onclick="toggleMapMax(this)" title="Maximize map"><i class="ti ti-maximize"></i></button></span></div>
     <div class="map-wrap">
-      <div class="info-pill" id="infoPill">Click any marker for incident details · scroll to zoom</div>
+      <div class="info-pill" id="infoPill">Tap a state to see its security summary</div>
+      <div class="mobile-map-key" aria-hidden="true"><span>Lower</span><i></i><span>Higher</span></div>
       <div class="map-layers-panel" id="mapLayersPanel">
         <button class="mlp-head" id="mlpToggle" onclick="toggleLayersPanel()" title="Map layers">
           <svg class="mlp-head-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 8l10 5 10-5-10-5z"/><path d="M2 13l10 5 10-5"/></svg>
@@ -319,6 +326,10 @@
 
 <!-- HOTSPOT ANALYSIS VIEW -->
 <div id="hotspotView" class="hotspot-view">
+  <div class="hs-mobile-intro">
+    <i class="ti ti-flame"></i>
+    <div><strong>Areas needing attention</strong><span>Swipe through the highest-risk states, then tap the map for details.</span></div>
+  </div>
   <div class="hs-formula-bar">
     <span class="hs-formula-label">Risk score =</span>
     <span class="hs-formula" id="hsFormula"></span>
@@ -350,6 +361,9 @@
         </div>
       </section>
 
+      <button type="button" class="mobile-disclosure mobile-hotspot-toggle" aria-expanded="false" aria-controls="hsSidePanel" onclick="toggleMobileHotspotDetails(this)">
+        <i class="ti ti-chart-bar"></i><span>Show more analysis</span><i class="ti ti-chevron-down disclosure-caret"></i>
+      </button>
       <section class="hs-charts-panel" id="hsSidePanel">
         <div class="hs-ptabs" id="hsPanelTabs" role="tablist"></div>
 
@@ -471,18 +485,21 @@
         <div class="filter-group"><label class="filter-label">Date</label><input type="date" class="filter-select" id="tvDate"></div>
         <div class="filter-group"><label class="filter-label">Departure</label><input type="time" class="filter-select" id="tvTime" value="16:30"></div>
       </div>
-      <button class="apply-btn tv-assess" onclick="assessRoute()"><i class="ti ti-shield-check"></i> Find and assess routes</button>
+      <button class="apply-btn tv-assess" onclick="assessRoute()"><i class="ti ti-shield-check"></i> Check route safety</button>
     </div>
 
-    <div class="tv-sec-label" id="tvOptionsLabel">Route</div>
+    <div class="tv-sec-label" id="tvOptionsLabel">Choose a route</div>
     <div class="tv-options" id="tvRouteOptions"></div>
 
-    <div class="tv-sec-label">Selected route</div>
+    <div class="tv-sec-label" id="tvSelectedLabel">Route safety summary</div>
     <div class="panel-card tv-rating-card" id="tvRatingCard">
       <div class="tv-empty">Select a route and tap <strong>Assess this route</strong>.</div>
     </div>
 
-    <div class="tv-sec-label">Directions by road</div>
+    <button type="button" class="mobile-disclosure mobile-directions-toggle" id="tvDirectionsToggle" aria-expanded="false" aria-controls="tvDirList" onclick="toggleMobileDirections(this)">
+      <i class="ti ti-list-directions"></i><span>Show road directions</span><i class="ti ti-chevron-down disclosure-caret"></i>
+    </button>
+    <div class="tv-sec-label" id="tvDirectionsLabel">Directions by road</div>
     <div class="panel-card tv-dir-card" id="tvDirList">
       <div class="tv-empty">Assess a route to see the roads it follows.</div>
     </div>
@@ -492,7 +509,7 @@
   <section class="tv-center">
     <div class="panel-card tv-map-card">
       <div class="panel-hd tv-map-hd">
-        <span><i class="ti ti-route"></i> Route Risk Map — <span id="tvRouteTitle">select a route</span></span>
+        <span><i class="ti ti-route"></i> Route map — <span id="tvRouteTitle">select a route</span></span>
         <span class="map-hd-right"><span class="tv-map-note" id="tvStretchNote"></span><button class="map-max-btn" onclick="toggleMapMax(this)" title="Maximize map"><i class="ti ti-maximize"></i></button></span>
       </div>
       <div class="tv-map-wrap">
@@ -670,7 +687,11 @@
         </div>
       </div>
 
-      <div class="lr2-card">
+      <button type="button" class="mobile-disclosure mobile-report-media-toggle" aria-expanded="false" aria-controls="reportEvidenceCard reportCameraCard" onclick="toggleReportMedia(this)">
+        <i class="ti ti-camera-plus"></i><span>Add photo or video (optional)</span><i class="ti ti-chevron-down disclosure-caret"></i>
+      </button>
+
+      <div class="lr2-card" id="reportEvidenceCard">
         <div class="lr2-card-hd">
           <div class="lr2-card-icon-wrap lr2-ci-purple"><i class="ti ti-paperclip"></i></div>
           <div class="lr2-card-hd-text"><div class="lr2-card-title">Evidence &amp; Media</div><div class="lr2-card-sub">Attach photos or videos from your device</div></div>
@@ -689,7 +710,7 @@
         <div class="lr2-media-grid" id="uploadAttachmentList"></div>
       </div>
 
-      <div class="lr2-card">
+      <div class="lr2-card" id="reportCameraCard">
         <div class="lr2-card-hd">
           <div class="lr2-card-icon-wrap lr2-ci-red"><i class="ti ti-video"></i></div>
           <div class="lr2-card-hd-text"><div class="lr2-card-title">Live Camera</div><div class="lr2-card-sub">Record footage of the incident right now (max 60 s)</div></div>

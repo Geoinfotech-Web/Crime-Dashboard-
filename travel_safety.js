@@ -556,9 +556,8 @@ function tvParkCardHtml(park, town){
   </div>`;
 }
 
-// In bus mode the parks of each town are listed under it — From, then To —
-// with the chosen one described. A choice that still applies is kept; otherwise
-// it starts on the nearest park with a mapped position.
+// In bus mode each end gets one familiar dropdown. A choice that still applies
+// is kept; otherwise it starts on the nearest park with a mapped position.
 function tvFillParks(){
   ['from', 'to'].forEach(end => {
     const box = document.getElementById(end === 'from' ? 'tvParksFrom' : 'tvParksTo');
@@ -567,28 +566,20 @@ function tvFillParks(){
     const town = document.getElementById(end === 'from' ? 'tvFrom' : 'tvTo').value;
     const parks = tvParksFor(town);
     if (!parks.some(park => park.id === tvParkChoice[end])) tvParkChoice[end] = (parks.find(park => !park.approx) || parks[0])?.id || null;
+    const label = end === 'from' ? 'Departure park' : 'Arrival park';
+    const selectId = end === 'from' ? 'tvParkFromSelect' : 'tvParkToSelect';
     if (!parks.length){
-      box.innerHTML = `<div class="tv-park-hint"><i class="ti ti-info-circle"></i> No bus park is on record for ${escapeHtml(town)} yet, so this end of the route uses the town centre.</div>`;
+      box.innerHTML = `<label class="filter-label" for="${selectId}">${label}</label>
+        <select class="filter-select tv-park-select" id="${selectId}" disabled><option>Town centre (no park listed)</option></select>
+        <div class="tv-park-hint"><i class="ti ti-info-circle"></i> No bus park is on record for ${escapeHtml(town)} yet, so this end uses the town centre.</div>`;
       return;
     }
     const chosen = parks.find(park => park.id === tvParkChoice[end]);
-    const keep = box.querySelector('.tv-parklist-rows')?.scrollTop || 0;
-    box.innerHTML = `
-      <div class="tv-parklist-hd"><span><i class="ti ti-bus"></i> ${end === 'from' ? 'Departure' : 'Arrival'} park</span><em>${tvPlural(parks.length, 'park')} · tap one, or tap it on the map</em></div>
-      <div class="tv-parklist-rows" role="listbox" aria-label="${end === 'from' ? 'Departure' : 'Arrival'} parks in ${escapeHtml(town)}">
-        ${parks.map(park => `<button type="button" role="option" aria-selected="${park === chosen}" class="tv-parkrow is-${end}${park === chosen ? ' is-chosen' : ''}" onclick="chooseTravelPark('${end}', '${escapeHtml(park.id)}')">
-          <i class="ti ${park === chosen ? 'ti-check' : 'ti-bus'}"></i>
-          <span class="tv-parkrow-name">${escapeHtml(park.name)}</span>
-          <span class="tv-parkrow-km">${park.kmFromCentre} km</span>
-        </button>`).join('')}
-      </div>
+    box.innerHTML = `<label class="filter-label" for="${selectId}">${label}</label>
+      <select class="filter-select tv-park-select" id="${selectId}" onchange="chooseTravelPark('${end}', this.value)">
+        ${parks.map(park => `<option value="${escapeHtml(park.id)}"${park === chosen ? ' selected' : ''}>${escapeHtml(park.name)} · ${park.kmFromCentre} km from centre</option>`).join('')}
+      </select>
       ${tvParkCardHtml(chosen, town)}`;
-    // Stay where the list was scrolled, unless that hides the chosen park.
-    const rows = box.querySelector('.tv-parklist-rows');
-    const row = rows.querySelector('.is-chosen');
-    rows.scrollTop = keep;
-    const top = row.offsetTop - rows.offsetTop;
-    if (top < rows.scrollTop || top + row.offsetHeight > rows.scrollTop + rows.clientHeight) rows.scrollTop = Math.max(0, top - row.offsetHeight);
   });
 }
 
@@ -942,6 +933,12 @@ function renderTravelRoute(corr, refit){
 
 function renderTravelRating(corr, risk, label){
   const band = tvRiskBand(risk.score);
+  const publicAdvice = {
+    'is-crit': 'High risk. Consider postponing the trip or choosing a safer route. If travel is essential, go in daylight and do not travel alone.',
+    'is-high': 'Use extra caution. Travel in daylight, share your route with someone, and check recent reports before leaving.',
+    'is-mod': 'Take normal precautions and stay alert on the highlighted parts of the road.',
+    'is-low': 'This is the lower-risk option, but daylight travel and normal road precautions are still recommended.'
+  }[band.cls];
   const entry = tvNewsEntry(corr);
   const live = entry.data;
   const stamp = entry.status === 'loading' ? 'checking news…'
@@ -982,6 +979,7 @@ function renderTravelRating(corr, risk, label){
       <span class="tv-risk-badge ${band.cls}">${band.label}</span>
       <span class="tv-rating-live">${escapeHtml(stamp)}</span>
     </div>
+    <div class="tv-public-summary ${band.cls}"><i class="ti ${band.cls === 'is-low' ? 'ti-circle-check' : 'ti-alert-triangle'}"></i><span>${publicAdvice}</span></div>
     <div class="tv-score">${risk.score}<span class="tv-score-max"> /100</span></div>
     <div class="tv-corridor"><i class="ti ti-route"></i> ${escapeHtml(corr.from)} → ${escapeHtml(corr.to)} · ${escapeHtml(corr.road)}${label ? ` · ${escapeHtml(label)}` : ''}</div>
     <div class="tv-metrics">
@@ -1272,8 +1270,8 @@ function renderTravelRecs(corr, departHour, dep, risks, labels){
     ready: 'Before you leave'
   };
   document.getElementById('tvRecs').innerHTML = Object.keys(groups).filter(key => groups[key].length).map(key =>
-    `<div class="tv-rec-group">${titles[key]}</div>` + groups[key].map(r =>
-      `<div class="tv-rec ${r.c}"><i class="ti ${r.i} tv-rec-ico"></i><div class="tv-rec-txt">${r.html}</div></div>`).join('')).join('');
+    `<section class="tv-rec-section" data-group="${key}"><div class="tv-rec-group">${titles[key]}</div>` + groups[key].map(r =>
+      `<div class="tv-rec ${r.c}"><i class="ti ${r.i} tv-rec-ico"></i><div class="tv-rec-txt">${r.html}</div></div>`).join('') + '</section>').join('');
 }
 
 // ── Directions ───────────────────────────────────────────────
