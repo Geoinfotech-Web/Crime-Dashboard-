@@ -1772,6 +1772,19 @@ monthBarChart = new Chart(document.getElementById('monthBar'),{
 
 // Reset view: everything back to how the page opens, without reloading it
 // (the live feed, briefing and watchlist are kept).
+// On phones, use one clear shaded layer instead of overlapping bubbles and
+// trend pins. This runs after all time/filter state exists and is captured as
+// the mobile reset default below.
+if (window.matchMedia('(max-width: 768px)').matches) {
+  ['acled', 'rising'].forEach(key => {
+    if (layerState[key]) toggleLayer(document.querySelector(`.toggle-btn[data-layer="${key}"]`));
+  });
+  if (!layerState.deaths) toggleLayer(document.querySelector('.toggle-btn[data-layer="deaths"]'));
+  document.getElementById('mapLayersPanel')?.classList.add('collapsed');
+  setLegendCollapsed(true);
+  const mobileHint = document.getElementById('infoPill');
+  if (mobileHint) mobileHint.textContent = 'Tap a state to see its security summary';
+}
 const LAYER_DEFAULTS = { ...layerState };
 function resetDashboard(){
   if (timePlayTimer) toggleTimePlay();
@@ -1790,8 +1803,9 @@ function resetDashboard(){
   document.querySelectorAll('.toggle-btn[data-layer]').forEach(btn => {
     if (layerState[btn.dataset.layer] !== LAYER_DEFAULTS[btn.dataset.layer]) toggleLayer(btn);
   });
-  document.getElementById('mapLayersPanel')?.classList.remove('collapsed');
-  setLegendCollapsed(false);
+  const compactMap = window.matchMedia('(max-width: 768px)').matches;
+  document.getElementById('mapLayersPanel')?.classList.toggle('collapsed', compactMap);
+  setLegendCollapsed(compactMap);
   try { localStorage.removeItem(LEGEND_PREF); } catch (error) { /* private mode */ }
   // Map, panels and search
   liveReportLayer.clearLayers();
@@ -1952,6 +1966,35 @@ function navTo(view) {
   }
   showView(view); // 'dashboard' | 'hotspot' | 'travel'
 }
+
+function setMobileDisclosure(button, container, expanded, openText, closedText) {
+  container.classList.toggle('mobile-expanded', expanded);
+  button.setAttribute('aria-expanded', String(expanded));
+  const label = button.querySelector('span');
+  if (label) label.textContent = expanded ? openText : closedText;
+}
+
+function toggleMobileStats(button) {
+  const row = document.getElementById('dashKpiRow');
+  setMobileDisclosure(button, row, !row.classList.contains('mobile-expanded'), 'Fewer statistics', 'More statistics');
+}
+
+function toggleMobileFilters(button) {
+  const panel = document.querySelector('.left-panel');
+  setMobileDisclosure(button, panel, !panel.classList.contains('mobile-expanded'), 'Hide map filters', 'Filter the map');
+}
+
+function toggleMobileDirections(button) {
+  const view = document.getElementById('travelView');
+  setMobileDisclosure(button, view, !view.classList.contains('mobile-expanded'), 'Hide road directions', 'Show road directions');
+}
+
+function toggleMobileHotspotDetails(button) {
+  const grid = button.closest('.hs-main-grid');
+  setMobileDisclosure(button, grid, !grid.classList.contains('mobile-expanded'), 'Hide detailed analysis', 'Show more analysis');
+}
+
+Object.assign(window, { toggleMobileStats, toggleMobileFilters, toggleMobileDirections, toggleMobileHotspotDetails });
 
 function showView(view) {
   const dash = view === 'dashboard';
