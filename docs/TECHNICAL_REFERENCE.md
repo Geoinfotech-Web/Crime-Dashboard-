@@ -1,4 +1,4 @@
-# GeoSentry NG — Technical Reference
+# CI360 — Technical Reference
 
 Reference material for developers working on the code. For the big picture,
 read [ARCHITECTURE.md](ARCHITECTURE.md) first.

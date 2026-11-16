@@ -13,10 +13,11 @@
 
   .topbar{background:var(--bg);border-bottom:1px solid var(--border);padding:9px 18px;display:flex;align-items:center;gap:18px;flex-shrink:0;}
   .topbar-left{display:flex;align-items:center;gap:11px;flex:0 0 auto;min-width:230px;}
-  .brand-logo{width:42px;height:42px;background:linear-gradient(150deg,#2a3346,#1a2740);border:1px solid rgba(255,255,255,0.12);border-radius:11px;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;box-shadow:0 6px 18px rgba(0,0,0,0.3),inset 0 1px 0 rgba(255,255,255,0.08);}
-  .brand-logo-img{width:30px;height:30px;object-fit:contain;display:block;}
+  /* The logo is a complete app icon (dark rounded square), so the box adds only a shadow. */
+  .brand-logo{width:42px;height:42px;border-radius:11px;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;box-shadow:0 6px 18px rgba(0,0,0,0.3);}
+  .brand-logo-img{width:100%;height:100%;object-fit:contain;display:block;}
+  [data-theme="light"] .brand-name{color:#0d2647;}
   .brand-name{font-size:16px;font-weight:800;color:#fff;letter-spacing:-.01em;}
-  .brand-ng{color:var(--blue);}
   .brand-name-hs{display:flex;align-items:center;gap:7px;}
   .brand-name-hs i{color:var(--red);font-size:17px;}
   .brand-sub{font-size:11px;color:var(--text2);margin-top:2px;display:flex;align-items:center;gap:6px;}

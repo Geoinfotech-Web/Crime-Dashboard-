@@ -1,4 +1,4 @@
-# GeoSentry NG — Handoff to the Web Team
+# CI360 — Handoff to the Web Team
 
 This is the starting point for the team taking over the Crime Dashboard. It
 covers what exists, what state it is in, what must be fixed before a public

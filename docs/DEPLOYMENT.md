@@ -1,4 +1,4 @@
-# GeoSentry NG — Running and Deploying
+# CI360 — Running and Deploying
 
 ## 1. Run it locally
 
@@ -47,14 +47,14 @@ flowchart LR
 ### 2.1 Service (Linux, systemd) — template
 
 ```ini
-# /etc/systemd/system/geosentry.service
+# /etc/systemd/system/ci360.service
 [Unit]
-Description=GeoSentry NG dashboard
+Description=CI360 dashboard
 After=network-online.target
 
 [Service]
-User=geosentry
-WorkingDirectory=/opt/geosentry
+User=ci360
+WorkingDirectory=/opt/ci360
 ExecStart=/usr/bin/python3 dev_server.py --host 127.0.0.1 --port 8085
 Environment=DASHBOARD_ADMIN_TOKEN=change-me-to-a-long-random-value
 Environment=DASHBOARD_SUBMIT_RATE_MAX=20
@@ -138,7 +138,7 @@ Without the Python server:
 
 | Task | How |
 |---|---|
-| Restart | `systemctl restart geosentry` (clears the in-memory news and route caches) |
+| Restart | `systemctl restart ci360` (clears the in-memory news and route caches) |
 | Health check | `GET /api/live-news` should return 200 with `articles` |
 | A news feed is failing | `warnings` in `/api/live-news` names it; edit or remove it in `rss_config.json` |
 | Refresh ACLED / LGA / displacement data | See DATA_SOURCES.md; commit the regenerated JSON files |

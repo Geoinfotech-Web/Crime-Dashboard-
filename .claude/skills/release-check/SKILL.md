@@ -1,6 +1,6 @@
 ---
 name: release-check
-description: Pre-release checks for the GeoSentry NG dashboard — syntax checks, the security must-fix list, and the manual QA checklist in the browser. Use before merging a pull request or deploying.
+description: Pre-release checks for the CI360 dashboard — syntax checks, the security must-fix list, and the manual QA checklist in the browser. Use before merging a pull request or deploying.
 ---
 
 # Release check

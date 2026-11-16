@@ -1,10 +1,10 @@
-# GeoSentry NG — User Guide
+# CI360 — User Guide
 
 A short tour of each screen, for QA, support staff and new users.
 
 ## Top bar and navigation
 
-* **GeoSentry NG** stays at the top left on every screen. The line beneath it
+* **CI360** and its logo stay at the top left on every screen. The line beneath it
   says which view you are in.
 * **Search** finds a state or a local government area (LGA) and zooms the map
   to it.

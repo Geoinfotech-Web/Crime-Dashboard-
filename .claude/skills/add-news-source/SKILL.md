@@ -1,6 +1,6 @@
 ---
 name: add-news-source
-description: Add, fix or remove a news feed for the GeoSentry NG live news (rss_config.json) or the regional outlets used for route and state news (regional_sources.json). Use when a feed is failing or a new Nigerian outlet should be monitored.
+description: Add, fix or remove a news feed for the CI360 live news (rss_config.json) or the regional outlets used for route and state news (regional_sources.json). Use when a feed is failing or a new Nigerian outlet should be monitored.
 ---
 
 # Add or fix a news source

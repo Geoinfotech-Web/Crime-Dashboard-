@@ -1,4 +1,4 @@
-# GeoSentry NG — Data Sources, Terms and Refresh
+# CI360 — Data Sources, Terms and Refresh
 
 Every number on the dashboard comes from one of the sources below. Keep the
 attributions visible (the Dashboard map footer already credits ACLED, OCHA,

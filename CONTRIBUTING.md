@@ -1,4 +1,4 @@
-# Contributing to GeoSentry NG
+# Contributing to CI360
 
 ## Workflow
 

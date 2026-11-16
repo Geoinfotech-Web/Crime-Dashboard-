@@ -1,4 +1,4 @@
-# GeoSentry NG — Nigeria Crime & Security Dashboard
+# CI360 — Nigeria Crime & Security Dashboard
 
 A web dashboard that brings together historical conflict data, live news from
 Nigerian outlets and citizen reports to show where insecurity is, where it is

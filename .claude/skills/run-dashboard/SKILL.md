@@ -1,6 +1,6 @@
 ---
 name: run-dashboard
-description: Start the GeoSentry NG dashboard server locally and confirm the page and API respond. Use when asked to run, start, restart or "make live" the crime dashboard.
+description: Start the CI360 dashboard server locally and confirm the page and API respond. Use when asked to run, start, restart or "make live" the crime dashboard.
 ---
 
 # Run the dashboard

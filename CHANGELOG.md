@@ -2,7 +2,12 @@
 
 Dates are commit dates. Pull requests are in `Geoinfotech-Web/Crime-Dashboard-`.
 
-## Unreleased — PR #4 (`feature/acled-history-insights-layout`)
+## Unreleased — rename to CI360
+- The product is renamed from GeoSentry NG to **CI360**: top bar, page titles, risk-report exports and documentation.
+- New CI360 app icon as the top-bar logo and browser-tab icon (`logo.png`, `favicon.png`).
+- The brand name is readable in the light theme.
+
+## 2026-10-22 — PR #4 (`feature/acled-history-insights-layout`)
 
 **Data**
 - **ACLED history.** State totals, KPI cards, charts and the risk index now

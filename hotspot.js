@@ -1357,7 +1357,7 @@ function hsFormulaText() {
 function exportHotspotReport() {
   if (!cachedHotspots) return;
   hsDownloadCsv([
-    ['GeoSentry NG — composite risk report'],
+    ['CI360 — composite risk report'],
     [`Generated ${new Date().toISOString()}`],
     [`Risk score = ${hsFormulaText()}; scores are relative to the highest-risk state (100)`],
     [],
@@ -1370,7 +1370,7 @@ function exportHotspotReport() {
       s.liveArticles.length, s.liveReports.length,
       s.liveArticles[0]?.title || '', s.liveArticles[0]?.url || ''
     ])
-  ], `geosentry-risk-report-${new Date().toISOString().slice(0, 10)}.csv`);
+  ], `ci360-risk-report-${new Date().toISOString().slice(0, 10)}.csv`);
 }
 
 // Everything the state panel shows, as one sectioned CSV.
@@ -1386,7 +1386,7 @@ function exportStateReport(stateName) {
     [[], [title], ...(rows.length ? [header, ...rows] : [[emptyText]])];
 
   hsDownloadCsv([
-    [`GeoSentry NG — state risk profile: ${s.state}`],
+    [`CI360 — state risk profile: ${s.state}`],
     [`Generated ${new Date().toISOString()}`],
     [`Risk score = ${hsFormulaText()}; scores are relative to the highest-risk state (100)`],
     [],
@@ -1435,5 +1435,5 @@ function exportStateReport(stateName) {
       'No aid worker security records'),
     ...section('CHECKPOINTS', ['Checkpoint', 'Road', 'Type', 'Status'],
       checkpoints.map(cp => [cp.name, cp.road, cp.type, cp.status]), 'No checkpoints on record')
-  ], `geosentry-${s.state.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-profile-${new Date().toISOString().slice(0, 10)}.csv`);
+  ], `ci360-${s.state.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-profile-${new Date().toISOString().slice(0, 10)}.csv`);
 }

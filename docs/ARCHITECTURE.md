@@ -1,6 +1,6 @@
-# GeoSentry NG — Technical Architecture
+# CI360 — Technical Architecture
 
-GeoSentry NG is a security-intelligence dashboard for Nigeria. It combines
+CI360 is a security-intelligence dashboard for Nigeria. It combines
 historical conflict data (ACLED), aid-worker security records (AWSD), live news
 from Nigerian outlets and citizen reports into four views: **Dashboard**,
 **Hotspot Analysis**, **Travel Safety** and **Live Report**.

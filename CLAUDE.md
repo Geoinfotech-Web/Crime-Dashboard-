@@ -1,4 +1,4 @@
-# GeoSentry NG — guide for Claude Code
+# CI360 — guide for Claude Code
 
 Nigeria crime and security dashboard. Plain HTML/CSS/JS front end, Python
 standard-library server, no build step, no database. Read

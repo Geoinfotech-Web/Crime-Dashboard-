@@ -33,7 +33,7 @@ MAX_LOCAL_PLACES = 24      # one state on its own can afford to name more towns
 # Pressure at which the live index reaches about 63 of 100.
 PRESSURE_SCALE = 12
 GOOGLE_NEWS = "https://news.google.com/rss/search?q={query}&hl=en-NG&gl=NG&ceid=NG:en"
-USER_AGENT = "Mozilla/5.0 (compatible; GeoSentryNG/1.0; route news monitor)"
+USER_AGENT = "Mozilla/5.0 (compatible; CI360/1.0; route news monitor)"
 
 # What a traveller needs to know about, most serious first: the first
 # category whose pattern matches a headline is the one it gets.
